@@ -43,6 +43,50 @@ function createApp(): Express {
     });
   });
 
+  app.get('/api/docs', (_req: Request, res: Response) => {
+    const openApiDocument = {
+      openapi: '3.0.0',
+      info: {
+        title: 'Helpdesk API',
+        version: '1.0.0',
+        description: 'API REST para gerenciamento de chamados de suporte técnico.',
+      },
+      servers: [
+        { url: 'http://localhost:3000' },
+      ],
+      paths: {
+        '/health': {
+          get: {
+            summary: 'Health check da API',
+            responses: {
+              '200': {
+                description: 'API funcional',
+              },
+            },
+          },
+        },
+        '/auth/register': {
+          post: {
+            summary: 'Cadastro do cliente',
+            responses: {
+              '201': { description: 'Usuário criado' },
+            },
+          },
+        },
+        '/auth/login': {
+          post: {
+            summary: 'Login do usuário',
+            responses: {
+              '200': { description: 'Login realizado' },
+            },
+          },
+        },
+      },
+    };
+
+    res.status(200).json(openApiDocument);
+  });
+
   app.use('/api/v1', authRouter);
   app.use('/api/v1', adminRouter);
   app.use('/api/v1', ticketRouter);

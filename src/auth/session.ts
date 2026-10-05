@@ -2,8 +2,8 @@ import crypto from 'node:crypto';
 import type { Response } from 'express';
 import * as jwt from 'jsonwebtoken';
 import { appConfig } from '../config/env';
-import { Role, UserStatus } from '../domain/enums';
-import type { User } from '../domain/models';
+import { Role, TicketStatus, UserStatus } from '../domain/enums';
+import type { Ticket, User } from '../domain/models';
 
 export type PublicUser = Omit<User, 'passwordHash'>;
 
@@ -17,10 +17,22 @@ export interface RefreshSessionRecord {
   revokedAt: number | null;
 }
 
+export interface SectorRecord {
+  id: number;
+  name: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 const users = new Map<number, User>();
 const refreshSessions = new Map<string, RefreshSessionRecord>();
 const userByEmail = new Map<string, number>();
+const sectors = new Map<number, SectorRecord>();
+const tickets = new Map<number, Ticket>();
 let nextUserId = 1;
+let nextSectorId = 1;
+let nextTicketId = 1;
 
 export function sanitizeUser(user: User): PublicUser {
   const safeUser = { ...user } as Partial<User>;
@@ -30,6 +42,10 @@ export function sanitizeUser(user: User): PublicUser {
 
 export function getUserById(userId: number): User | undefined {
   return users.get(userId);
+}
+
+export function listUsersByRole(role?: Role): User[] {
+  return Array.from(users.values()).filter((user) => (role ? user.role === role : true));
 }
 
 export function getUserByEmail(email: string): User | undefined {
@@ -52,6 +68,9 @@ export function createUserRecord(input: {
   email: string;
   passwordHash: string;
   role?: Role;
+  mustChangePassword?: boolean;
+  sectorId?: number | null;
+  isActive?: boolean;
 }): User {
   const userId = nextUserId++;
   const now = new Date().toISOString();
@@ -61,9 +80,9 @@ export function createUserRecord(input: {
     email: input.email.toLowerCase(),
     passwordHash: input.passwordHash,
     role: input.role ?? Role.CLIENT,
-    sectorId: null,
-    isActive: true,
-    mustChangePassword: false,
+    sectorId: input.sectorId ?? null,
+    isActive: input.isActive ?? true,
+    mustChangePassword: input.mustChangePassword ?? false,
     passwordChangedAt: null,
     lastLoginAt: null,
     createdAt: now,
@@ -74,6 +93,133 @@ export function createUserRecord(input: {
   upsertUser(user);
 
   return user;
+}
+
+export function listActiveSectors(): SectorRecord[] {
+  return Array.from(sectors.values()).filter((sector) => sector.isActive);
+}
+
+export function listAllSectors(): SectorRecord[] {
+  return Array.from(sectors.values()).sort((a, b) => a.id - b.id);
+}
+
+export function createSectorRecord(name: string, isActive = true): SectorRecord {
+  const sectorId = nextSectorId++;
+  const now = new Date().toISOString();
+  const sector: SectorRecord = {
+    id: sectorId,
+    name,
+    isActive,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  sectors.set(sectorId, sector);
+  return sector;
+}
+
+export function getSectorById(sectorId: number): SectorRecord | undefined {
+  return sectors.get(sectorId);
+}
+
+export function updateSectorRecord(sectorId: number, patch: Partial<Pick<SectorRecord, 'name' | 'isActive'>>): SectorRecord | undefined {
+  const sector = sectors.get(sectorId);
+  if (!sector) {
+    return undefined;
+  }
+
+  const updated = {
+    ...sector,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  };
+
+  sectors.set(sectorId, updated);
+  return updated;
+}
+
+export function createTicketRecord(input: {
+  clientId: number;
+  sectorId: number | null;
+  title: string;
+  description: string;
+  technicianId?: number | null;
+  status?: TicketStatus;
+}): Ticket {
+  const ticketId = nextTicketId++;
+  const now = new Date().toISOString();
+  const ticket: Ticket = {
+    id: ticketId,
+    clientId: input.clientId,
+    technicianId: input.technicianId ?? null,
+    sectorId: input.sectorId ?? null,
+    title: input.title.trim(),
+    description: input.description.trim(),
+    status: input.status ?? TicketStatus.OPEN,
+    resolutionNote: null,
+    createdAt: now,
+    updatedAt: now,
+    assumedAt: null,
+    resolvedAt: null,
+    cancelledAt: null,
+  };
+
+  tickets.set(ticketId, ticket);
+  return ticket;
+}
+
+export function getTicketById(ticketId: number): Ticket | undefined {
+  return tickets.get(ticketId);
+}
+
+export function listTicketsByClient(clientId: number): Ticket[] {
+  return Array.from(tickets.values())
+    .filter((ticket) => ticket.clientId === clientId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export function listTicketsByTechnician(technicianId: number): Ticket[] {
+  return Array.from(tickets.values())
+    .filter((ticket) => ticket.technicianId === technicianId)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+export function listOpenTickets(): Ticket[] {
+  return Array.from(tickets.values())
+    .filter((ticket) => ticket.status === TicketStatus.OPEN)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export function countTicketsByClient(clientId: number): Record<string, number> {
+  const counts: Record<string, number> = {
+    OPEN: 0,
+    IN_PROGRESS: 0,
+    RESOLVED: 0,
+    CANCELLED: 0,
+  };
+
+  for (const ticket of listTicketsByClient(clientId)) {
+    counts[ticket.status] = (counts[ticket.status] ?? 0) + 1;
+  }
+
+  return counts;
+}
+
+export function updateTicketRecord(ticketId: number, patch: Partial<Ticket>): Ticket | undefined {
+  const ticket = tickets.get(ticketId);
+
+  if (!ticket) {
+    return undefined;
+  }
+
+  const updated: Ticket = {
+    ...ticket,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  };
+
+  tickets.set(ticketId, updated);
+  return updated;
 }
 
 export function hashToken(value: string): string {

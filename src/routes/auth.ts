@@ -46,6 +46,11 @@ const changePasswordSchema = z.object({
   }),
 });
 
+const updateEmailSchema = z.object({
+  email: z.string().trim().email('E-mail inválido.'),
+  currentPassword: z.string().min(1, 'Senha atual obrigatória.'),
+});
+
 function asyncHandler(
   handler: (req: Request, res: Response, next: NextFunction) => Promise<unknown> | unknown,
 ) {
@@ -239,6 +244,44 @@ authRouter.patch(
       user.updatedAt = new Date().toISOString();
       upsertUser(user);
     }
+
+    res.json({
+      success: true,
+      data: {
+        user: sanitizeUser(user),
+      },
+    });
+  }),
+);
+
+authRouter.patch(
+  '/me/email',
+  requireAuth,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const parsed = updateEmailSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      throw new ValidationError('Dados inválidos para atualização de e-mail.', { issues: parsed.error.flatten() });
+    }
+
+    const user = req.user;
+    if (!user) {
+      throw new AuthError('AUTH_REQUIRED', 'Usuário não autenticado.');
+    }
+
+    const isCurrentPasswordValid = await bcrypt.compare(parsed.data.currentPassword, user.passwordHash);
+    if (!isCurrentPasswordValid) {
+      throw new AuthError('WRONG_CURRENT_PASSWORD', 'Senha atual incorreta.', { code: 'WRONG_CURRENT_PASSWORD' });
+    }
+
+    const existingUser = getUserByEmail(parsed.data.email);
+    if (existingUser && existingUser.id !== user.id) {
+      throw new ConflictError('EMAIL_ALREADY_REGISTERED', 'Este e-mail já está em uso.');
+    }
+
+    user.email = parsed.data.email.toLowerCase();
+    user.updatedAt = new Date().toISOString();
+    upsertUser(user);
 
     res.json({
       success: true,

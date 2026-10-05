@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { Role } from '../domain/enums';
 import type { User } from '../domain/models';
-import { AuthError } from '../errors/app-error';
+import { AuthError, ForbiddenError } from '../errors/app-error';
 import { getUserById, verifyAccessToken } from '../auth/session';
 
 export interface AuthenticatedRequest extends Request {
@@ -32,6 +32,12 @@ export function requireAuth(req: AuthenticatedRequest, _res: Response, next: Nex
 
     if (!user.isActive) {
       next(new AuthError('ACCOUNT_DISABLED', 'Esta conta está desativada.'));
+      return;
+    }
+
+    const allowedPaths = ['/api/v1/me', '/api/v1/me/password', '/api/v1/auth/logout'];
+    if (user.mustChangePassword && !allowedPaths.includes(req.path)) {
+      next(new ForbiddenError('MUST_CHANGE_PASSWORD', 'Você precisa trocar a senha antes de continuar.'));
       return;
     }
 

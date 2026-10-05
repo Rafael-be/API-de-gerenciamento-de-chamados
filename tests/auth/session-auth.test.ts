@@ -1,14 +1,18 @@
+import bcrypt from 'bcrypt';
 import request from 'supertest';
 import app from '../../src/app';
 import {
   createRefreshToken,
   createUserRecord,
   findRefreshSessionByToken,
+  revokeRefreshToken,
   rotateRefreshToken,
   sanitizeUser,
+  setSessionCookies,
   signAccessToken,
   verifyAccessToken,
 } from '../../src/auth/session';
+import { appConfig } from '../../src/config/env';
 import { Role } from '../../src/domain/enums';
 import { requireAuth, requireRole } from '../../src/middleware/auth';
 
@@ -208,6 +212,91 @@ describe('Auth and session flow', () => {
 
     expect(logoutResponse.status).toBe(200);
     expect(logoutResponse.body.success).toBe(true);
+  });
+
+  it('covers session helper fallbacks, unknown routes and logout edge cases', async () => {
+    const previousTtl = appConfig.jwtAccessTtl;
+    const user = createUserRecord({
+      name: 'Helena Nunes',
+      email: 'helena@exemplo.com',
+      passwordHash: 'hashed',
+      role: Role.CLIENT,
+    });
+    const accessToken = signAccessToken(user);
+
+    appConfig.jwtAccessTtl = 'invalid';
+
+    const res = {
+      cookie: jest.fn(),
+      clearCookie: jest.fn(),
+    } as any;
+    const refresh = createRefreshToken(user.id);
+    revokeRefreshToken(refresh.tokenValue);
+    setSessionCookies(res, accessToken, refresh.tokenValue);
+
+    expect(res.cookie).toHaveBeenCalledWith(
+      'access_token',
+      expect.any(String),
+      expect.objectContaining({ maxAge: 15 * 60 * 1000 }),
+    );
+
+    appConfig.jwtAccessTtl = previousTtl;
+
+    const notFound = await request(app).get('/api/v1/rota-inexistente');
+    expect(notFound.status).toBe(404);
+    expect(notFound.body.error.code).toBe('ROUTE_NOT_FOUND');
+
+    const disabledPasswordHash = await bcrypt.hash('SenhaSegura123', appConfig.bcryptRounds);
+    const disabledUser = createUserRecord({
+      name: 'Ícaro Ramos',
+      email: 'icaro@exemplo.com',
+      passwordHash: disabledPasswordHash,
+      role: Role.CLIENT,
+    });
+    disabledUser.isActive = false;
+
+    const disabledLogin = await request(app)
+      .post('/api/v1/auth/login')
+      .send({
+        email: 'icaro@exemplo.com',
+        password: 'SenhaSegura123',
+      })
+      .set('Origin', 'http://localhost:5173');
+
+    expect(disabledLogin.status).toBe(401);
+    expect(disabledLogin.body.error.code).toBe('ACCOUNT_DISABLED');
+  });
+
+  it('updates profile and email details for an authenticated user', async () => {
+    const passwordHash = await bcrypt.hash('SenhaSegura123', appConfig.bcryptRounds);
+    const user = createUserRecord({
+      name: 'Júlia Almeida',
+      email: 'julia@exemplo.com',
+      passwordHash,
+      role: Role.CLIENT,
+    });
+    const token = signAccessToken(user);
+
+    const profileUpdate = await request(app)
+      .patch('/api/v1/me')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Origin', 'http://localhost:5173')
+      .send({ name: 'Júlia Nova' });
+
+    expect(profileUpdate.status).toBe(200);
+    expect(profileUpdate.body.data.user.name).toBe('Júlia Nova');
+
+    const emailUpdate = await request(app)
+      .patch('/api/v1/me/email')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Origin', 'http://localhost:5173')
+      .send({
+        email: 'julia.nova@exemplo.com',
+        currentPassword: 'SenhaSegura123',
+      });
+
+    expect(emailUpdate.status).toBe(200);
+    expect(emailUpdate.body.data.user.email).toBe('julia.nova@exemplo.com');
   });
 
   it('covers authorization middleware edge cases and validation/refresh failures', async () => {

@@ -6,6 +6,7 @@ import { appConfig } from './config/env';
 import authRouter from './routes/auth';
 import adminRouter from './routes/admin';
 import ticketRouter from './routes/tickets';
+import commentRouter from './routes/comments';
 import { AppError } from './errors/app-error';
 
 function createApp(): Express {
@@ -31,6 +32,7 @@ function createApp(): Express {
   app.use('/api/v1', authRouter);
   app.use('/api/v1', adminRouter);
   app.use('/api/v1', ticketRouter);
+  app.use('/api/v1', commentRouter);
 
   app.use((_req: Request, res: Response) => {
     res.status(404).json({

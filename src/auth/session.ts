@@ -3,7 +3,7 @@ import type { Response } from 'express';
 import * as jwt from 'jsonwebtoken';
 import { appConfig } from '../config/env';
 import { Role, TicketStatus, UserStatus } from '../domain/enums';
-import type { Ticket, User } from '../domain/models';
+import type { Ticket, TicketComment, User } from '../domain/models';
 
 export type PublicUser = Omit<User, 'passwordHash'>;
 
@@ -30,9 +30,11 @@ const refreshSessions = new Map<string, RefreshSessionRecord>();
 const userByEmail = new Map<string, number>();
 const sectors = new Map<number, SectorRecord>();
 const tickets = new Map<number, Ticket>();
+const comments = new Map<number, TicketComment>();
 let nextUserId = 1;
 let nextSectorId = 1;
 let nextTicketId = 1;
+let nextCommentId = 1;
 
 export function sanitizeUser(user: User): PublicUser {
   const safeUser = { ...user } as Partial<User>;
@@ -219,6 +221,55 @@ export function updateTicketRecord(ticketId: number, patch: Partial<Ticket>): Ti
   };
 
   tickets.set(ticketId, updated);
+  return updated;
+}
+
+export function createCommentRecord(input: {
+  ticketId: number;
+  authorId: number;
+  parentId?: number | null;
+  body: string;
+}): TicketComment {
+  const commentId = nextCommentId++;
+  const now = new Date().toISOString();
+  const comment: TicketComment = {
+    id: commentId,
+    ticketId: input.ticketId,
+    authorId: input.authorId,
+    parentId: input.parentId ?? null,
+    body: input.body.trim(),
+    editedAt: null,
+    deletedAt: null,
+    createdAt: now,
+  };
+
+  comments.set(commentId, comment);
+  return comment;
+}
+
+export function getCommentById(commentId: number): TicketComment | undefined {
+  return comments.get(commentId);
+}
+
+export function listCommentsByTicket(ticketId: number): TicketComment[] {
+  return Array.from(comments.values())
+    .filter((comment) => comment.ticketId === ticketId && comment.deletedAt === null)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+export function updateCommentRecord(commentId: number, patch: Partial<TicketComment>): TicketComment | undefined {
+  const comment = comments.get(commentId);
+
+  if (!comment) {
+    return undefined;
+  }
+
+  const updated: TicketComment = {
+    ...comment,
+    ...patch,
+  };
+
+  comments.set(commentId, updated);
   return updated;
 }
 

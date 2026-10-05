@@ -1,0 +1,58 @@
+services:
+  - type: web
+    name: helpdesk-api
+    env: docker
+    plan: free
+    region: oregon
+    healthCheckPath: /api/v1/health
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: LOG_LEVEL
+        value: info
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_POOL_LIMIT
+        value: '10'
+      - key: DB_SSL
+        value: 'true'
+      - key: DB_SSL_CA
+        value: ''
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_ACCESS_TTL
+        value: 15m
+      - key: REFRESH_TTL_DAYS
+        value: '30'
+      - key: REFRESH_GRACE_SECONDS
+        value: '20'
+      - key: BCRYPT_ROUNDS
+        value: '12'
+      - key: COOKIE_SECURE
+        value: 'true'
+      - key: CORS_ORIGINS
+        sync: false
+      - key: TRUST_PROXY
+        value: '1'
+      - key: SOCKET_TICKET_TTL_SECONDS
+        value: '30'
+      - key: SUPERUSER_NAME
+        sync: false
+      - key: SUPERUSER_EMAIL
+        sync: false
+      - key: SUPERUSER_PASSWORD
+        sync: false
+      - key: DEFAULT_RESET_PASSWORD
+        sync: false

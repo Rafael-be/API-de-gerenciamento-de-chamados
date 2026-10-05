@@ -1,0 +1,26 @@
+version: '3.9'
+
+services:
+  mysql-test:
+    image: mysql:8.0
+    container_name: helpdesk-mysql-test
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: test_root_pass
+      MYSQL_DATABASE: helpdesk_test
+      MYSQL_USER: helpdesk_user
+      MYSQL_PASSWORD: helpdesk_pass
+    ports:
+      - '3307:3306'
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --log-bin-trust-function-creators=1
+      - --sql-mode=STRICT_ALL_TABLES
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-ptest_root_pass"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s

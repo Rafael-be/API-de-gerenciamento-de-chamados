@@ -1,0 +1,551 @@
+{
+  "info": {
+    "name": "Helpdesk API",
+    "description": "Coleção de requisições para a API REST de gerenciamento de chamados.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000/api/v1",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "POST /auth/register",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ana Souza\",\n  \"email\": \"ana@exemplo.com\",\n  \"password\": \"SenhaSegura123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "register"]
+            }
+          }
+        },
+        {
+          "name": "POST /auth/login",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"ana@exemplo.com\",\n  \"password\": \"SenhaSegura123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            }
+          }
+        },
+        {
+          "name": "POST /auth/refresh",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "refresh"]
+            }
+          }
+        },
+        {
+          "name": "POST /auth/logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "logout"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Perfil",
+      "item": [
+        {
+          "name": "GET /me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["me"]
+            }
+          }
+        },
+        {
+          "name": "PATCH /me",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ana Nova\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["me"]
+            }
+          }
+        },
+        {
+          "name": "PATCH /me/email",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"ana.nova@exemplo.com\",\n  \"currentPassword\": \"SenhaSegura123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/me/email",
+              "host": ["{{baseUrl}}"],
+              "path": ["me", "email"]
+            }
+          }
+        },
+        {
+          "name": "PATCH /me/password",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"SenhaSegura123\",\n  \"newPassword\": \"NovaSenha123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/me/password",
+              "host": ["{{baseUrl}}"],
+              "path": ["me", "password"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin / Setores",
+      "item": [
+        {
+          "name": "GET /admin/sectors",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/sectors",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "sectors"]
+            }
+          }
+        },
+        {
+          "name": "POST /admin/sectors",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Infraestrutura\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/sectors",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "sectors"]
+            }
+          }
+        },
+        {
+          "name": "PATCH /admin/sectors/:id",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Infraestrutura e Redes\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/sectors/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "sectors", "1"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin / Técnicos",
+      "item": [
+        {
+          "name": "GET /admin/technicians",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/technicians",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "technicians"]
+            }
+          }
+        },
+        {
+          "name": "POST /admin/technicians",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Técnico Nova\",\n  \"email\": \"tecnico@exemplo.com\",\n  \"sectorId\": 1\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/technicians",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "technicians"]
+            }
+          }
+        },
+        {
+          "name": "PATCH /admin/technicians/:id",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"ACTIVE\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/technicians/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "technicians", "1"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chamados",
+      "item": [
+        {
+          "name": "POST /tickets",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Aplicativo travando\",\n  \"description\": \"Ao iniciar a aplicação, a sessão trava e não responde.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/tickets",
+              "host": ["{{baseUrl}}"],
+              "path": ["tickets"]
+            }
+          }
+        },
+        {
+          "name": "GET /tickets",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tickets",
+              "host": ["{{baseUrl}}"],
+              "path": ["tickets"]
+            }
+          }
+        },
+        {
+          "name": "GET /tickets/counts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tickets/counts",
+              "host": ["{{baseUrl}}"],
+              "path": ["tickets", "counts"]
+            }
+          }
+        },
+        {
+          "name": "GET /tickets/:id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tickets/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["tickets", "1"]
+            }
+          }
+        },
+        {
+          "name": "PATCH /tickets/:id",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Aplicativo travando após login\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/tickets/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["tickets", "1"]
+            }
+          }
+        },
+        {
+          "name": "POST /tickets/:id/cancel",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tickets/1/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["tickets", "1", "cancel"]
+            }
+          }
+        },
+        {
+          "name": "POST /tickets/:id/assume",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tickets/1/assume",
+              "host": ["{{baseUrl}}"],
+              "path": ["tickets", "1", "assume"]
+            }
+          }
+        },
+        {
+          "name": "POST /tickets/:id/return",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tickets/1/return",
+              "host": ["{{baseUrl}}"],
+              "path": ["tickets", "1", "return"]
+            }
+          }
+        },
+        {
+          "name": "POST /tickets/:id/finish",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resolutionNote\": \"O problema foi corrigido e validado em produção.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/tickets/1/finish",
+              "host": ["{{baseUrl}}"],
+              "path": ["tickets", "1", "finish"]
+            }
+          }
+        },
+        {
+          "name": "GET /technician/tickets",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/technician/tickets?view=queue",
+              "host": ["{{baseUrl}}"],
+              "path": ["technician", "tickets"],
+              "query": [
+                { "key": "view", "value": "queue" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Comentários",
+      "item": [
+        {
+          "name": "GET /tickets/:id/comments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tickets/1/comments",
+              "host": ["{{baseUrl}}"],
+              "path": ["tickets", "1", "comments"]
+            }
+          }
+        },
+        {
+          "name": "POST /tickets/:id/comments",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"Estou validando a correção e posso te responder em seguida.\",\n  \"parentId\": null\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/tickets/1/comments",
+              "host": ["{{baseUrl}}"],
+              "path": ["tickets", "1", "comments"]
+            }
+          }
+        },
+        {
+          "name": "PATCH /comments/:id",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"Comentário atualizado com mais detalhes.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/comments/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["comments", "1"]
+            }
+          }
+        },
+        {
+          "name": "DELETE /comments/:id",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/comments/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["comments", "1"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Notificações",
+      "item": [
+        {
+          "name": "GET /notifications",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications",
+              "host": ["{{baseUrl}}"],
+              "path": ["notifications"]
+            }
+          }
+        },
+        {
+          "name": "GET /notifications/unread-count",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/unread-count",
+              "host": ["{{baseUrl}}"],
+              "path": ["notifications", "unread-count"]
+            }
+          }
+        },
+        {
+          "name": "PATCH /notifications/:id/read",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/1/read",
+              "host": ["{{baseUrl}}"],
+              "path": ["notifications", "1", "read"]
+            }
+          }
+        },
+        {
+          "name": "PATCH /notifications/read-all",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/read-all",
+              "host": ["{{baseUrl}}"],
+              "path": ["notifications", "read-all"]
+            }
+          }
+        },
+        {
+          "name": "POST /notifications/socket-ticket",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/socket-ticket",
+              "host": ["{{baseUrl}}"],
+              "path": ["notifications", "socket-ticket"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

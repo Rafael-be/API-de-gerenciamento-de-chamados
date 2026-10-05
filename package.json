@@ -1,0 +1,67 @@
+{
+  "name": "api-de-gerenciamento-de-chamados",
+  "version": "1.0.0",
+  "description": "API REST para **gerenciamento de chamados de suporte técnico**, construída com **TypeScript, Node.js, Express e MySQL puro**. Clientes abrem chamados, técnicos os assumem e resolvem, e o superusuário administra a equipe. Tudo com autenticação por cookies `httpOnly`, notificações em tempo real, auditoria e regras de negócio protegidas até dentro do banco de dados.",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "lint": "eslint . --ext .ts --max-warnings 0",
+    "format": "prettier --write .",
+    "test": "jest --runInBand --coverage",
+    "prepare": "husky install",
+    "commitlint": "commitlint --from=HEAD~1 --to=HEAD",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "seed:superuser": "tsx scripts/seed-superuser.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Rafael-be/API-de-gerenciamento-de-chamados.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Rafael-be/API-de-gerenciamento-de-chamados/issues"
+  },
+  "homepage": "https://github.com/Rafael-be/API-de-gerenciamento-de-chamados#readme",
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.5",
+    "express": "^5.2.1",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "mysql2": "^3.24.5",
+    "pino": "^10.4.0",
+    "pino-http": "^11.0.0",
+    "socket.io": "^4.8.4",
+    "umzug": "^3.8.3",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^21.2.3",
+    "@commitlint/config-conventional": "^21.2.3",
+    "@types/bcrypt": "^6.0.0",
+    "@types/cookie-parser": "^1.4.10",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/jest": "^30.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^26.6.4",
+    "@types/supertest": "^7.2.1",
+    "@typescript-eslint/eslint-plugin": "^8.71.0",
+    "@typescript-eslint/parser": "^8.71.0",
+    "eslint": "^8.57.0",
+    "husky": "^9.1.7",
+    "jest": "^30.5.2",
+    "prettier": "^3.9.9",
+    "supertest": "^7.3.1",
+    "ts-jest": "^29.4.14",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3"
+  }
+}

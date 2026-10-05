@@ -1,8 +1,10 @@
-import express, { type Express, type Request, type Response } from 'express';
+import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { appConfig } from './config/env';
+import authRouter from './routes/auth';
+import { AppError } from './errors/app-error';
 
 function createApp(): Express {
   const app = express();
@@ -24,6 +26,8 @@ function createApp(): Express {
     });
   });
 
+  app.use('/api/v1', authRouter);
+
   app.use((_req: Request, res: Response) => {
     res.status(404).json({
       success: false,
@@ -31,6 +35,32 @@ function createApp(): Express {
         code: 'ROUTE_NOT_FOUND',
         message: 'Rota não encontrada.',
       },
+    });
+  });
+
+  app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (error instanceof AppError) {
+      res.status(error.httpStatus).json({
+        success: false,
+        error: {
+          code: error.code,
+          message: error.message,
+          details: error.details ?? null,
+        },
+        requestId: 'req-local',
+      });
+      return;
+    }
+
+    const message = error instanceof Error ? error.message : 'Erro interno inesperado.';
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message,
+        details: null,
+      },
+      requestId: 'req-local',
     });
   });
 

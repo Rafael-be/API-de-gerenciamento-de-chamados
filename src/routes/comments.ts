@@ -2,12 +2,14 @@ import { type Request, type Response, Router } from 'express';
 import { z } from 'zod';
 import {
   createCommentRecord,
+  createNotificationRecord,
   getCommentById,
   getTicketById,
   listCommentsByTicket,
   updateCommentRecord,
 } from '../auth/session';
-import { Role } from '../domain/enums';
+import { NotificationType, Role } from '../domain/enums';
+import { emitNotificationToUser } from '../socket/notifications';
 import { ValidationError } from '../errors/app-error';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 
@@ -142,6 +144,33 @@ commentRouter.post('/tickets/:id/comments', requireAuth, (req: AuthenticatedRequ
     parentId: parsed.data.parentId ?? null,
     body: parsed.data.body,
   });
+
+  const targets = new Set<number>();
+  const otherUserId = ticket.clientId === req.user!.id ? ticket.technicianId : ticket.clientId;
+
+  if (otherUserId !== null) {
+    targets.add(otherUserId);
+  }
+
+  if (ticket.technicianId !== null && ticket.technicianId !== req.user!.id) {
+    targets.add(ticket.technicianId);
+  }
+
+  if (ticket.clientId !== req.user!.id) {
+    targets.add(ticket.clientId);
+  }
+
+  for (const targetUserId of targets) {
+    const notification = createNotificationRecord({
+      userId: targetUserId,
+      type: NotificationType.COMMENT_CREATED,
+      ticketId,
+      commentId: comment.id,
+      actorId: req.user!.id,
+      message: `Novo comentário no chamado "${ticket.title}".`,
+    });
+    emitNotificationToUser(targetUserId, notification);
+  }
 
   res.status(201).json({
     success: true,

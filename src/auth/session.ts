@@ -2,8 +2,8 @@ import crypto from 'node:crypto';
 import type { Response } from 'express';
 import * as jwt from 'jsonwebtoken';
 import { appConfig } from '../config/env';
-import { Role, TicketStatus, UserStatus } from '../domain/enums';
-import type { Ticket, TicketComment, User } from '../domain/models';
+import { NotificationType, Role, TicketStatus, UserStatus } from '../domain/enums';
+import type { Notification, Ticket, TicketComment, User } from '../domain/models';
 
 export type PublicUser = Omit<User, 'passwordHash'>;
 
@@ -31,10 +31,13 @@ const userByEmail = new Map<string, number>();
 const sectors = new Map<number, SectorRecord>();
 const tickets = new Map<number, Ticket>();
 const comments = new Map<number, TicketComment>();
+const notifications = new Map<number, Notification>();
+const socketTickets = new Map<string, { userId: number; expiresAt: number }>();
 let nextUserId = 1;
 let nextSectorId = 1;
 let nextTicketId = 1;
 let nextCommentId = 1;
+let nextNotificationId = 1;
 
 export function sanitizeUser(user: User): PublicUser {
   const safeUser = { ...user } as Partial<User>;
@@ -271,6 +274,109 @@ export function updateCommentRecord(commentId: number, patch: Partial<TicketComm
 
   comments.set(commentId, updated);
   return updated;
+}
+
+export function createNotificationRecord(input: {
+  userId: number;
+  type: NotificationType;
+  ticketId?: number | null;
+  commentId?: number | null;
+  actorId?: number | null;
+  message: string;
+  isRead?: boolean;
+}): Notification {
+  const notificationId = nextNotificationId++;
+  const now = new Date().toISOString();
+  const notification: Notification = {
+    id: notificationId,
+    userId: input.userId,
+    type: input.type,
+    ticketId: input.ticketId ?? null,
+    commentId: input.commentId ?? null,
+    actorId: input.actorId ?? null,
+    message: input.message.trim(),
+    isRead: input.isRead ?? false,
+    readAt: input.isRead ? now : null,
+    createdAt: now,
+  };
+
+  notifications.set(notificationId, notification);
+  return notification;
+}
+
+export function listNotificationsForUser(userId: number): Notification[] {
+  return Array.from(notifications.values())
+    .filter((notification) => notification.userId === userId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export function getUnreadNotificationCount(userId: number): number {
+  return listNotificationsForUser(userId).filter((notification) => !notification.isRead).length;
+}
+
+export function markNotificationRead(notificationId: number, userId: number): Notification | undefined {
+  const notification = notifications.get(notificationId);
+
+  if (!notification || notification.userId !== userId) {
+    return undefined;
+  }
+
+  const updated: Notification = {
+    ...notification,
+    isRead: true,
+    readAt: new Date().toISOString(),
+  };
+
+  notifications.set(notificationId, updated);
+  return updated;
+}
+
+export function markAllNotificationsReadForUser(userId: number): number {
+  let updatedCount = 0;
+
+  for (const [notificationId, notification] of notifications.entries()) {
+    if (notification.userId !== userId || notification.isRead) {
+      continue;
+    }
+
+    notifications.set(notificationId, {
+      ...notification,
+      isRead: true,
+      readAt: new Date().toISOString(),
+    });
+    updatedCount += 1;
+  }
+
+  return updatedCount;
+}
+
+export function createSocketTicket(userId: number): { ticket: string; expiresAt: number; expiresInSeconds: number } {
+  const ticket = crypto.randomBytes(24).toString('hex');
+  const expiresAt = Date.now() + appConfig.socketTicketTtlSeconds * 1000;
+
+  socketTickets.set(ticket, { userId, expiresAt });
+
+  return {
+    ticket,
+    expiresAt,
+    expiresInSeconds: appConfig.socketTicketTtlSeconds,
+  };
+}
+
+export function verifySocketTicket(ticket: string): number | null {
+  const record = socketTickets.get(ticket);
+
+  if (!record) {
+    return null;
+  }
+
+  if (record.expiresAt <= Date.now()) {
+    socketTickets.delete(ticket);
+    return null;
+  }
+
+  socketTickets.delete(ticket);
+  return record.userId;
 }
 
 export function hashToken(value: string): string {

@@ -2,6 +2,7 @@ import { type Request, type Response, Router } from 'express';
 import { z } from 'zod';
 import {
   countTicketsByClient,
+  createNotificationRecord,
   createTicketRecord,
   getTicketById,
   listOpenTickets,
@@ -9,7 +10,8 @@ import {
   listTicketsByTechnician,
   updateTicketRecord,
 } from '../auth/session';
-import { Role, TicketStatus } from '../domain/enums';
+import { NotificationType, Role, TicketStatus } from '../domain/enums';
+import { emitNotificationToUser } from '../socket/notifications';
 import { ValidationError } from '../errors/app-error';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 
@@ -280,6 +282,17 @@ ticketRouter.post('/tickets/:id/cancel', requireAuth, async (req: AuthenticatedR
       cancelledAt: new Date().toISOString(),
     });
 
+    if (ticket.technicianId !== null) {
+      const notification = createNotificationRecord({
+        userId: ticket.technicianId,
+        type: NotificationType.TICKET_CANCELLED,
+        ticketId: ticket.id,
+        actorId: req.user.id,
+        message: `O cliente cancelou o chamado "${ticket.title}".`,
+      });
+      emitNotificationToUser(ticket.technicianId, notification);
+    }
+
     res.json({
       success: true,
       data: {
@@ -341,6 +354,15 @@ ticketRouter.post('/tickets/:id/assume', requireAuth, async (req: AuthenticatedR
     assumedAt: new Date().toISOString(),
   });
 
+  const notification = createNotificationRecord({
+    userId: ticket.clientId,
+    type: NotificationType.TICKET_ASSUMED,
+    ticketId: ticket.id,
+    actorId: req.user.id,
+    message: `O chamado "${ticket.title}" foi assumido pela equipe de suporte.`,
+  });
+  emitNotificationToUser(ticket.clientId, notification);
+
   res.json({
     success: true,
     data: {
@@ -389,6 +411,15 @@ ticketRouter.post('/tickets/:id/return', requireAuth, async (req: AuthenticatedR
     status: TicketStatus.OPEN,
     assumedAt: null,
   });
+
+  const notification = createNotificationRecord({
+    userId: ticket.clientId,
+    type: NotificationType.TICKET_RETURNED,
+    ticketId: ticket.id,
+    actorId: req.user.id,
+    message: `O chamado "${ticket.title}" foi devolvido à fila de atendimento.`,
+  });
+  emitNotificationToUser(ticket.clientId, notification);
 
   res.json({
     success: true,
@@ -443,6 +474,15 @@ ticketRouter.post('/tickets/:id/finish', requireAuth, async (req: AuthenticatedR
     resolutionNote: parsed.data.resolutionNote ?? null,
     resolvedAt: new Date().toISOString(),
   });
+
+  const notification = createNotificationRecord({
+    userId: ticket.clientId,
+    type: NotificationType.TICKET_RESOLVED,
+    ticketId: ticket.id,
+    actorId: req.user.id,
+    message: `O chamado "${ticket.title}" foi finalizado e está resolvido.`,
+  });
+  emitNotificationToUser(ticket.clientId, notification);
 
   res.json({
     success: true,

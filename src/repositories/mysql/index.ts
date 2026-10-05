@@ -1,0 +1,7 @@
+export { userRepository } from './user.repository';
+export { sectorRepository } from './sector.repository';
+export { ticketRepository } from './ticket.repository';
+export { commentRepository } from './comment.repository';
+export { notificationRepository } from './notification.repository';
+export { refreshTokenRepository } from './refresh-token.repository';
+export { auditLogRepository } from './audit.repository';

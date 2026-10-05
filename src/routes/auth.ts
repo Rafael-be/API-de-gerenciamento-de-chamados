@@ -20,6 +20,7 @@ import {
 } from '../auth/session';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 import { authRateLimiter } from '../middleware/security';
+import { findUserByEmail, loginUser, registerUser, updateUser } from '../services/auth.service';
 
 const authRouter = Router();
 
@@ -71,23 +72,14 @@ authRouter.post(
     }
 
     const { name, email, password } = parsed.data;
-    const existingUser = getUserByEmail(email);
+    const existingUser = await findUserByEmail(email);
 
     if (existingUser) {
       throw new ConflictError('EMAIL_ALREADY_REGISTERED', 'Este e-mail já está em uso.');
     }
 
-    const passwordHash = await bcrypt.hash(password, appConfig.bcryptRounds);
-    const user = createUserRecord({
-      name,
-      email,
-      passwordHash,
-      role: Role.CLIENT,
-    });
-
-    const accessToken = signAccessToken(user);
-    const refreshSession = createRefreshToken(user.id);
-    setSessionCookies(res, accessToken, refreshSession.tokenValue);
+    const { user, accessToken, refreshToken } = await registerUser({ name, email, password });
+    setSessionCookies(res, accessToken, refreshToken);
 
     res.status(201).json({
       success: true,
@@ -109,21 +101,8 @@ authRouter.post(
     }
 
     const { email, password } = parsed.data;
-    const user = getUserByEmail(email);
-    const dummyHash = await bcrypt.hash('not-the-password', appConfig.bcryptRounds);
-    const isPasswordValid = user ? await bcrypt.compare(password, user.passwordHash) : await bcrypt.compare(password, dummyHash);
-
-    if (!user || !isPasswordValid) {
-      throw new AuthError('INVALID_CREDENTIALS', 'Credenciais inválidas.');
-    }
-
-    if (!user.isActive) {
-      throw new AuthError('ACCOUNT_DISABLED', 'Esta conta está desativada.');
-    }
-
-    const accessToken = signAccessToken(user);
-    const refreshSession = createRefreshToken(user.id);
-    setSessionCookies(res, accessToken, refreshSession.tokenValue);
+    const { user, accessToken, refreshToken } = await loginUser({ email, password });
+    setSessionCookies(res, accessToken, refreshToken);
 
     res.json({
       success: true,

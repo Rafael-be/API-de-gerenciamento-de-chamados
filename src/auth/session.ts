@@ -68,6 +68,26 @@ export function upsertUser(user: User): User {
   return user;
 }
 
+export function upsertSector(sector: SectorRecord): SectorRecord {
+  sectors.set(sector.id, sector);
+  return sector;
+}
+
+export function upsertTicket(ticket: Ticket): Ticket {
+  tickets.set(ticket.id, ticket);
+  return ticket;
+}
+
+export function upsertComment(comment: TicketComment): TicketComment {
+  comments.set(comment.id, comment);
+  return comment;
+}
+
+export function upsertNotification(notification: Notification): Notification {
+  notifications.set(notification.id, notification);
+  return notification;
+}
+
 export function createUserRecord(input: {
   name: string;
   email: string;

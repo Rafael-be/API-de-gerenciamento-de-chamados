@@ -1,17 +1,18 @@
 import { type Request, type Response, Router } from 'express';
 import { z } from 'zod';
 import {
+  cancelTicket,
   countTicketsByClient,
-  createNotificationRecord,
-  createTicketRecord,
-  getTicketById,
+  createTicket,
+  finishTicket,
+  getTicket,
   listOpenTickets,
-  listTicketsByClient,
-  listTicketsByTechnician,
-  updateTicketRecord,
-} from '../auth/session';
+  listTicketsForClient,
+  returnTicket,
+  assumeTicket,
+  updateTicket,
+} from '../services/ticket.service';
 import { NotificationType, Role, TicketStatus } from '../domain/enums';
-import { emitNotificationToUser } from '../socket/notifications';
 import { ValidationError } from '../errors/app-error';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 
@@ -68,7 +69,7 @@ ticketRouter.post('/tickets', requireAuth, async (req: AuthenticatedRequest, res
     throw new ValidationError('Dados do chamado inválidos.', { issues: parsed.error.flatten() });
   }
 
-  const ticket = createTicketRecord({
+  const ticket = await createTicket({
     clientId: req.user.id,
     sectorId: req.user.sectorId,
     title: parsed.data.title,
@@ -95,7 +96,7 @@ ticketRouter.get('/tickets', requireAuth, async (req: AuthenticatedRequest, res:
     return;
   }
 
-  const tickets = listTicketsByClient(req.user.id);
+  const tickets = await listTicketsForClient(req.user.id);
   res.json({
     success: true,
     data: {
@@ -125,7 +126,7 @@ ticketRouter.get('/tickets/counts', requireAuth, async (req: AuthenticatedReques
 
   res.json({
     success: true,
-    data: countTicketsByClient(req.user.id),
+    data: await countTicketsByClient(req.user.id),
   });
 });
 
@@ -142,14 +143,14 @@ ticketRouter.get('/technician/tickets', requireAuth, async (req: AuthenticatedRe
   }
 
   const view = String(req.query.view ?? 'queue');
-  let items = [] as ReturnType<typeof listOpenTickets>;
+  let items: Awaited<ReturnType<typeof listOpenTickets>> = [];
 
   if (view === 'mine') {
-    items = listTicketsByTechnician(req.user.id).filter((ticket) => ticket.status === TicketStatus.IN_PROGRESS || ticket.status === TicketStatus.RESOLVED);
+    items = (await listTicketsForClient(req.user.id)).filter((ticket) => ticket.status === TicketStatus.IN_PROGRESS || ticket.status === TicketStatus.RESOLVED);
   } else if (view === 'done') {
-    items = listTicketsByTechnician(req.user.id).filter((ticket) => ticket.status === TicketStatus.RESOLVED);
+    items = (await listTicketsForClient(req.user.id)).filter((ticket) => ticket.status === TicketStatus.RESOLVED);
   } else {
-    items = listOpenTickets();
+    items = await listOpenTickets();
   }
 
   res.json({
@@ -174,7 +175,7 @@ ticketRouter.get('/tickets/:id', requireAuth, async (req: AuthenticatedRequest, 
     throw new ValidationError('Identificador do chamado inválido.');
   }
 
-  const ticket = getTicketById(ticketId);
+  const ticket = await getTicket(ticketId);
   if (!ticket) {
     res.status(404).json({
       success: false,
@@ -186,7 +187,7 @@ ticketRouter.get('/tickets/:id', requireAuth, async (req: AuthenticatedRequest, 
     return;
   }
 
-  if (!canViewTicketForUser(ticket, req.user ?? { id: -1, role: Role.CLIENT })) {
+  if (!(await canViewTicketForUser(ticket, req.user ?? { id: -1, role: Role.CLIENT }))) {
     res.status(401).json({
       success: false,
       error: {
@@ -213,7 +214,7 @@ ticketRouter.patch('/tickets/:id', requireAuth, async (req: AuthenticatedRequest
     throw new ValidationError('Dados do chamado inválidos.', { issues: parsed.error.flatten() });
   }
 
-  const ticket = getTicketById(ticketId);
+  const ticket = await getTicket(ticketId);
   if (!ticket) {
     res.status(404).json({
       success: false,
@@ -247,7 +248,7 @@ ticketRouter.patch('/tickets/:id', requireAuth, async (req: AuthenticatedRequest
     return;
   }
 
-  const updated = updateTicketRecord(ticketId, {
+  const updated = await updateTicket(ticketId, {
     ...(parsed.data.title !== undefined ? { title: parsed.data.title } : {}),
     ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
   });
@@ -262,7 +263,7 @@ ticketRouter.patch('/tickets/:id', requireAuth, async (req: AuthenticatedRequest
 
 ticketRouter.post('/tickets/:id/cancel', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const ticketId = Number(req.params.id);
-  const ticket = getTicketById(ticketId);
+  const ticket = await getTicket(ticketId);
 
   if (!ticket) {
     res.status(404).json({
@@ -276,22 +277,7 @@ ticketRouter.post('/tickets/:id/cancel', requireAuth, async (req: AuthenticatedR
   }
 
   if (req.user?.role === Role.CLIENT && ensureOwner(ticket, req.user.id)) {
-    const updated = updateTicketRecord(ticketId, {
-      status: TicketStatus.CANCELLED,
-      technicianId: null,
-      cancelledAt: new Date().toISOString(),
-    });
-
-    if (ticket.technicianId !== null) {
-      const notification = createNotificationRecord({
-        userId: ticket.technicianId,
-        type: NotificationType.TICKET_CANCELLED,
-        ticketId: ticket.id,
-        actorId: req.user.id,
-        message: `O cliente cancelou o chamado "${ticket.title}".`,
-      });
-      emitNotificationToUser(ticket.technicianId, notification);
-    }
+    const updated = await cancelTicket(ticketId, req.user.id);
 
     res.json({
       success: true,
@@ -324,7 +310,7 @@ ticketRouter.post('/tickets/:id/assume', requireAuth, async (req: AuthenticatedR
   }
 
   const ticketId = Number(req.params.id);
-  const ticket = getTicketById(ticketId);
+  const ticket = await getTicket(ticketId);
 
   if (!ticket) {
     res.status(404).json({
@@ -348,20 +334,7 @@ ticketRouter.post('/tickets/:id/assume', requireAuth, async (req: AuthenticatedR
     return;
   }
 
-  const updated = updateTicketRecord(ticketId, {
-    technicianId: req.user.id,
-    status: TicketStatus.IN_PROGRESS,
-    assumedAt: new Date().toISOString(),
-  });
-
-  const notification = createNotificationRecord({
-    userId: ticket.clientId,
-    type: NotificationType.TICKET_ASSUMED,
-    ticketId: ticket.id,
-    actorId: req.user.id,
-    message: `O chamado "${ticket.title}" foi assumido pela equipe de suporte.`,
-  });
-  emitNotificationToUser(ticket.clientId, notification);
+  const updated = await assumeTicket(ticketId, req.user.id);
 
   res.json({
     success: true,
@@ -383,7 +356,7 @@ ticketRouter.post('/tickets/:id/return', requireAuth, async (req: AuthenticatedR
     return;
   }
 
-  const ticket = getTicketById(Number(req.params.id));
+  const ticket = await getTicket(Number(req.params.id));
   if (!ticket) {
     res.status(404).json({
       success: false,
@@ -406,20 +379,7 @@ ticketRouter.post('/tickets/:id/return', requireAuth, async (req: AuthenticatedR
     return;
   }
 
-  const updated = updateTicketRecord(ticket.id, {
-    technicianId: null,
-    status: TicketStatus.OPEN,
-    assumedAt: null,
-  });
-
-  const notification = createNotificationRecord({
-    userId: ticket.clientId,
-    type: NotificationType.TICKET_RETURNED,
-    ticketId: ticket.id,
-    actorId: req.user.id,
-    message: `O chamado "${ticket.title}" foi devolvido à fila de atendimento.`,
-  });
-  emitNotificationToUser(ticket.clientId, notification);
+  const updated = await returnTicket(ticket.id, req.user.id);
 
   res.json({
     success: true,
@@ -441,7 +401,7 @@ ticketRouter.post('/tickets/:id/finish', requireAuth, async (req: AuthenticatedR
     return;
   }
 
-  const ticket = getTicketById(Number(req.params.id));
+  const ticket = await getTicket(Number(req.params.id));
   if (!ticket) {
     res.status(404).json({
       success: false,
@@ -469,20 +429,7 @@ ticketRouter.post('/tickets/:id/finish', requireAuth, async (req: AuthenticatedR
     return;
   }
 
-  const updated = updateTicketRecord(ticket.id, {
-    status: TicketStatus.RESOLVED,
-    resolutionNote: parsed.data.resolutionNote ?? null,
-    resolvedAt: new Date().toISOString(),
-  });
-
-  const notification = createNotificationRecord({
-    userId: ticket.clientId,
-    type: NotificationType.TICKET_RESOLVED,
-    ticketId: ticket.id,
-    actorId: req.user.id,
-    message: `O chamado "${ticket.title}" foi finalizado e está resolvido.`,
-  });
-  emitNotificationToUser(ticket.clientId, notification);
+  const updated = await finishTicket(ticket.id, req.user.id, parsed.data.resolutionNote ?? undefined);
 
   res.json({
     success: true,

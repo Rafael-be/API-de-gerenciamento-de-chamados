@@ -1,20 +1,14 @@
 import { type Response, Router } from 'express';
 import { z } from 'zod';
-import {
-  createSocketTicket,
-  getUnreadNotificationCount,
-  listNotificationsForUser,
-  markAllNotificationsReadForUser,
-  markNotificationRead,
-} from '../auth/session';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
+import { getNotificationsForUser, getUnreadCount, issueSocketTicketForUser, readAllNotifications, readNotification } from '../services/notification.service';
 
 const notificationRouter = Router();
 
 const notificationIdSchema = z.coerce.number().int().positive();
 
-notificationRouter.get('/notifications', requireAuth, (req: AuthenticatedRequest, res: Response) => {
-  const items = listNotificationsForUser(req.user!.id);
+notificationRouter.get('/notifications', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const items = await getNotificationsForUser(req.user!.id);
 
   res.json({
     success: true,
@@ -31,8 +25,8 @@ notificationRouter.get('/notifications', requireAuth, (req: AuthenticatedRequest
   });
 });
 
-notificationRouter.get('/notifications/unread-count', requireAuth, (req: AuthenticatedRequest, res: Response) => {
-  const unreadCount = getUnreadNotificationCount(req.user!.id);
+notificationRouter.get('/notifications/unread-count', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const unreadCount = await getUnreadCount(req.user!.id);
 
   res.json({
     success: true,
@@ -42,7 +36,7 @@ notificationRouter.get('/notifications/unread-count', requireAuth, (req: Authent
   });
 });
 
-notificationRouter.patch('/notifications/:id/read', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+notificationRouter.patch('/notifications/:id/read', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const notificationId = notificationIdSchema.safeParse(req.params.id);
 
   if (!notificationId.success) {
@@ -56,7 +50,7 @@ notificationRouter.patch('/notifications/:id/read', requireAuth, (req: Authentic
     return;
   }
 
-  const notification = markNotificationRead(notificationId.data, req.user!.id);
+  const notification = await readNotification(notificationId.data, req.user!.id);
   if (!notification) {
     res.status(404).json({
       success: false,
@@ -76,8 +70,8 @@ notificationRouter.patch('/notifications/:id/read', requireAuth, (req: Authentic
   });
 });
 
-notificationRouter.patch('/notifications/read-all', requireAuth, (req: AuthenticatedRequest, res: Response) => {
-  const updatedCount = markAllNotificationsReadForUser(req.user!.id);
+notificationRouter.patch('/notifications/read-all', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const updatedCount = await readAllNotifications(req.user!.id);
 
   res.json({
     success: true,
@@ -87,8 +81,8 @@ notificationRouter.patch('/notifications/read-all', requireAuth, (req: Authentic
   });
 });
 
-notificationRouter.post('/notifications/socket-ticket', requireAuth, (req: AuthenticatedRequest, res: Response) => {
-  const ticket = createSocketTicket(req.user!.id);
+notificationRouter.post('/notifications/socket-ticket', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const ticket = await issueSocketTicketForUser(req.user!.id);
 
   res.json({
     success: true,

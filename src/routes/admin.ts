@@ -5,18 +5,7 @@ import { appConfig } from '../config/env';
 import { Role } from '../domain/enums';
 import { NotFoundError, ValidationError } from '../errors/app-error';
 import { requireAuth, requireRole, type AuthenticatedRequest } from '../middleware/auth';
-import {
-  createSectorRecord,
-  createUserRecord,
-  getSectorById,
-  getUserById,
-  listActiveSectors,
-  listAllSectors,
-  listUsersByRole,
-  sanitizeUser,
-  updateSectorRecord,
-  upsertUser,
-} from '../auth/session';
+import { adminCreateSector, adminCreateTechnician, adminListActiveSectors, adminListAllSectors, adminListTechnicians, adminToggleTechnicianStatus, adminUpdateSector, adminAssignTechnicianSector, sanitizePublicUser } from '../services/admin.service';
 
 const adminRouter = Router();
 
@@ -38,10 +27,11 @@ const patchStatusSchema = z.object({
   isActive: z.boolean(),
 });
 
-adminRouter.get('/sectors', (_req: Request, res: Response) => {
+adminRouter.get('/sectors', async (_req: Request, res: Response) => {
+  const sectors = await adminListActiveSectors();
   res.json({
     success: true,
-    data: listActiveSectors(),
+    data: sectors,
   });
 });
 
@@ -61,21 +51,22 @@ adminRouter.post('/admin/sectors', requireAuth, requireRole(Role.SUPERUSER), asy
     return;
   }
 
-  const sector = createSectorRecord(parsed.data.name, parsed.data.isActive ?? true);
+  const sector = await adminCreateSector(parsed.data.name, parsed.data.isActive ?? true);
   res.status(201).json({
     success: true,
     data: sector,
   });
 });
 
-adminRouter.get('/admin/sectors', requireAuth, requireRole(Role.SUPERUSER), (_req: AuthenticatedRequest, res: Response) => {
+adminRouter.get('/admin/sectors', requireAuth, requireRole(Role.SUPERUSER), async (_req: AuthenticatedRequest, res: Response) => {
+  const sectors = await adminListAllSectors();
   res.json({
     success: true,
-    data: listAllSectors(),
+    data: sectors,
   });
 });
 
-adminRouter.patch('/admin/sectors/:id', requireAuth, requireRole(Role.SUPERUSER), (req: Request, res: Response) => {
+adminRouter.patch('/admin/sectors/:id', requireAuth, requireRole(Role.SUPERUSER), async (req: Request, res: Response) => {
   const sectorId = Number(req.params.id);
   const parsed = sectorSchema.safeParse(req.body);
 
@@ -95,7 +86,7 @@ adminRouter.patch('/admin/sectors/:id', requireAuth, requireRole(Role.SUPERUSER)
     throw new ValidationError('Dados do setor inválidos.', { issues: parsed.error.flatten() });
   }
 
-  const sector = updateSectorRecord(sectorId, {
+  const sector = await adminUpdateSector(sectorId, {
     name: parsed.data.name,
     isActive: parsed.data.isActive ?? true,
   });
@@ -110,8 +101,8 @@ adminRouter.patch('/admin/sectors/:id', requireAuth, requireRole(Role.SUPERUSER)
   });
 });
 
-adminRouter.get('/admin/technicians', requireAuth, requireRole(Role.SUPERUSER), (_req: Request, res: Response) => {
-  const technicians = listUsersByRole(Role.TECHNICIAN).map((user) => sanitizeUser(user));
+adminRouter.get('/admin/technicians', requireAuth, requireRole(Role.SUPERUSER), async (_req: Request, res: Response) => {
+  const technicians = (await adminListTechnicians()).map((user) => sanitizePublicUser(user));
 
   res.json({
     success: true,
@@ -128,25 +119,22 @@ adminRouter.post('/admin/technicians', requireAuth, requireRole(Role.SUPERUSER),
 
   const { name, email, password, sectorId } = parsed.data;
   const passwordHash = await bcrypt.hash(password, appConfig.bcryptRounds);
-  const user = createUserRecord({
+  const user = await adminCreateTechnician({
     name,
     email,
     passwordHash,
-    role: Role.TECHNICIAN,
-    mustChangePassword: true,
     sectorId: sectorId ?? null,
-    isActive: true,
   });
 
   res.status(201).json({
     success: true,
     data: {
-      user: sanitizeUser(user),
+      user: sanitizePublicUser(user),
     },
   });
 });
 
-adminRouter.patch('/admin/technicians/:id/status', requireAuth, requireRole(Role.SUPERUSER), (req: Request, res: Response) => {
+adminRouter.patch('/admin/technicians/:id/status', requireAuth, requireRole(Role.SUPERUSER), async (req: Request, res: Response) => {
   const parsed = patchStatusSchema.safeParse(req.body);
 
   if (!parsed.success) {
@@ -154,48 +142,37 @@ adminRouter.patch('/admin/technicians/:id/status', requireAuth, requireRole(Role
   }
 
   const userId = Number(req.params.id);
-  const user = getUserById(userId);
+  const user = await adminToggleTechnicianStatus(userId, parsed.data.isActive);
 
   if (!user || user.role !== Role.TECHNICIAN) {
     throw new NotFoundError('TECHNICIAN_NOT_FOUND', 'Técnico não encontrado.');
   }
 
-  user.isActive = parsed.data.isActive;
-  user.updatedAt = new Date().toISOString();
-  upsertUser(user);
-
   res.json({
     success: true,
     data: {
-      user: sanitizeUser(user),
+      user: sanitizePublicUser(user),
     },
   });
 });
 
-adminRouter.patch('/admin/technicians/:id', requireAuth, requireRole(Role.SUPERUSER), (req: Request, res: Response) => {
+adminRouter.patch('/admin/technicians/:id', requireAuth, requireRole(Role.SUPERUSER), async (req: Request, res: Response) => {
   const userId = Number(req.params.id);
   const rawSectorId = Number(req.body?.sectorId);
 
-  const user = getUserById(userId);
+  const user = await adminAssignTechnicianSector(userId, Number.isFinite(rawSectorId) && rawSectorId > 0 ? rawSectorId : null);
   if (!user || user.role !== Role.TECHNICIAN) {
     throw new NotFoundError('TECHNICIAN_NOT_FOUND', 'Técnico não encontrado.');
   }
 
-  if (Number.isFinite(rawSectorId) && rawSectorId > 0) {
-    const sector = getSectorById(rawSectorId);
-    if (!sector) {
-      throw new NotFoundError('SECTOR_NOT_FOUND', 'Setor não encontrado.');
-    }
-    user.sectorId = rawSectorId;
+  if (Number.isFinite(rawSectorId) && rawSectorId > 0 && !user.sectorId) {
+    throw new NotFoundError('SECTOR_NOT_FOUND', 'Setor não encontrado.');
   }
-
-  user.updatedAt = new Date().toISOString();
-  upsertUser(user);
 
   res.json({
     success: true,
     data: {
-      user: sanitizeUser(user),
+      user: sanitizePublicUser(user),
     },
   });
 });

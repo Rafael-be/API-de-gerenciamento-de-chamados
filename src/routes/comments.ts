@@ -1,17 +1,10 @@
 import { type Request, type Response, Router } from 'express';
 import { z } from 'zod';
-import {
-  createCommentRecord,
-  createNotificationRecord,
-  getCommentById,
-  getTicketById,
-  listCommentsByTicket,
-  updateCommentRecord,
-} from '../auth/session';
-import { NotificationType, Role } from '../domain/enums';
-import { emitNotificationToUser } from '../socket/notifications';
+import { Role } from '../domain/enums';
 import { ValidationError } from '../errors/app-error';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
+import { createComment, deleteComment, getCommentByIdForValidation, listCommentsForTicket, updateComment } from '../services/comment.service';
+import { getTicketById } from '../auth/session';
 
 const commentRouter = Router();
 
@@ -40,7 +33,7 @@ function canAccessTicketForComment(ticket: { clientId: number; technicianId: num
   return false;
 }
 
-commentRouter.get('/tickets/:id/comments', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+commentRouter.get('/tickets/:id/comments', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const ticketId = Number(req.params.id);
   if (!Number.isInteger(ticketId) || ticketId <= 0) {
     throw new ValidationError('Identificador do ticket inválido.');
@@ -69,7 +62,7 @@ commentRouter.get('/tickets/:id/comments', requireAuth, (req: AuthenticatedReque
     return;
   }
 
-  const items = listCommentsByTicket(ticketId);
+  const items = await listCommentsForTicket(ticketId);
   res.json({
     success: true,
     data: {
@@ -85,7 +78,7 @@ commentRouter.get('/tickets/:id/comments', requireAuth, (req: AuthenticatedReque
   });
 });
 
-commentRouter.post('/tickets/:id/comments', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+commentRouter.post('/tickets/:id/comments', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const ticketId = Number(req.params.id);
   if (!Number.isInteger(ticketId) || ticketId <= 0) {
     throw new ValidationError('Identificador do ticket inválido.');
@@ -120,7 +113,7 @@ commentRouter.post('/tickets/:id/comments', requireAuth, (req: AuthenticatedRequ
   }
 
   if (parsed.data.parentId !== undefined && parsed.data.parentId !== null) {
-    const parent = getCommentById(parsed.data.parentId);
+    const parent = await getCommentByIdForValidation(parsed.data.parentId);
     if (!parent || parent.ticketId !== ticketId) {
       throw new ValidationError('Resposta inválida para este chamado.', { code: 'INVALID_COMMENT_PARENT' });
     }
@@ -138,39 +131,12 @@ commentRouter.post('/tickets/:id/comments', requireAuth, (req: AuthenticatedRequ
     }
   }
 
-  const comment = createCommentRecord({
+  const comment = await createComment({
     ticketId,
     authorId: req.user!.id,
     parentId: parsed.data.parentId ?? null,
     body: parsed.data.body,
   });
-
-  const targets = new Set<number>();
-  const otherUserId = ticket.clientId === req.user!.id ? ticket.technicianId : ticket.clientId;
-
-  if (otherUserId !== null) {
-    targets.add(otherUserId);
-  }
-
-  if (ticket.technicianId !== null && ticket.technicianId !== req.user!.id) {
-    targets.add(ticket.technicianId);
-  }
-
-  if (ticket.clientId !== req.user!.id) {
-    targets.add(ticket.clientId);
-  }
-
-  for (const targetUserId of targets) {
-    const notification = createNotificationRecord({
-      userId: targetUserId,
-      type: NotificationType.COMMENT_CREATED,
-      ticketId,
-      commentId: comment.id,
-      actorId: req.user!.id,
-      message: `Novo comentário no chamado "${ticket.title}".`,
-    });
-    emitNotificationToUser(targetUserId, notification);
-  }
 
   res.status(201).json({
     success: true,
@@ -180,13 +146,13 @@ commentRouter.post('/tickets/:id/comments', requireAuth, (req: AuthenticatedRequ
   });
 });
 
-commentRouter.patch('/comments/:id', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+commentRouter.patch('/comments/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const commentId = Number(req.params.id);
   if (!Number.isInteger(commentId) || commentId <= 0) {
     throw new ValidationError('Identificador do comentário inválido.');
   }
 
-  const comment = getCommentById(commentId);
+  const comment = await getCommentByIdForValidation(commentId);
   if (!comment) {
     res.status(404).json({
       success: false,
@@ -214,10 +180,7 @@ commentRouter.patch('/comments/:id', requireAuth, (req: AuthenticatedRequest, re
     throw new ValidationError('Dados do comentário inválidos.', { issues: parsed.error.flatten() });
   }
 
-  const updated = updateCommentRecord(commentId, {
-    body: parsed.data.body,
-    editedAt: new Date().toISOString(),
-  });
+  const updated = await updateComment(commentId, parsed.data.body);
 
   res.json({
     success: true,
@@ -227,13 +190,13 @@ commentRouter.patch('/comments/:id', requireAuth, (req: AuthenticatedRequest, re
   });
 });
 
-commentRouter.delete('/comments/:id', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+commentRouter.delete('/comments/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const commentId = Number(req.params.id);
   if (!Number.isInteger(commentId) || commentId <= 0) {
     throw new ValidationError('Identificador do comentário inválido.');
   }
 
-  const comment = getCommentById(commentId);
+  const comment = await getCommentByIdForValidation(commentId);
   if (!comment) {
     res.status(404).json({
       success: false,
@@ -256,9 +219,7 @@ commentRouter.delete('/comments/:id', requireAuth, (req: AuthenticatedRequest, r
     return;
   }
 
-  const updated = updateCommentRecord(commentId, {
-    deletedAt: new Date().toISOString(),
-  });
+  const updated = await deleteComment(commentId);
 
   res.json({
     success: true,

@@ -2,39 +2,29 @@ import { type NextFunction, type Request, type Response, Router } from 'express'
 import bcrypt from 'bcrypt';
 import { z } from 'zod';
 import { appConfig } from '../config/env';
-import { Role } from '../domain/enums';
 import { AuthError, ConflictError, ValidationError } from '../errors/app-error';
-import {
-  clearSessionCookies,
-  createRefreshToken,
-  createUserRecord,
-  findRefreshSessionByToken,
-  getUserByEmail,
-  getUserById,
-  hashToken,
-  rotateRefreshToken,
-  sanitizeUser,
-  setSessionCookies,
-  signAccessToken,
-  upsertUser,
-} from '../auth/session';
+import { clearSessionCookies, sanitizeUser, setSessionCookies } from '../auth/session';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 import { authRateLimiter } from '../middleware/security';
-import { findUserByEmail, loginUser, registerUser, updateUser } from '../services/auth.service';
+import { findUserByEmail, loginUser, refreshSession, registerUser, revokeRefreshToken, updateUser } from '../services/auth.service';
 
 const authRouter = Router();
 
+const passwordSchema = z.string()
+  .min(8, 'Senha deve ter pelo menos 8 caracteres.')
+  .refine((value) => /[A-Za-z]/.test(value) && /\d/.test(value), {
+    message: 'Senha deve conter letras e numeros.',
+  });
+
 const registerSchema = z.object({
   name: z.string().trim().min(2, 'Nome deve ter pelo menos 2 caracteres.'),
-  email: z.string().trim().email('E-mail inválido.'),
-  password: z.string().min(8, 'Senha deve ter pelo menos 8 caracteres.').refine((value) => /[A-Za-z]/.test(value) && /\d/.test(value), {
-    message: 'Senha deve conter letras e números.',
-  }),
+  email: z.string().trim().email('E-mail invalido.'),
+  password: passwordSchema,
 });
 
 const loginSchema = z.object({
-  email: z.string().trim().email('E-mail inválido.'),
-  password: z.string().min(1, 'Senha é obrigatória.'),
+  email: z.string().trim().email('E-mail invalido.'),
+  password: z.string().min(1, 'Senha e obrigatoria.'),
 });
 
 const updateProfileSchema = z.object({
@@ -42,15 +32,13 @@ const updateProfileSchema = z.object({
 });
 
 const changePasswordSchema = z.object({
-  currentPassword: z.string().min(1, 'Senha atual obrigatória.'),
-  newPassword: z.string().min(8, 'Nova senha deve ter pelo menos 8 caracteres.').refine((value) => /[A-Za-z]/.test(value) && /\d/.test(value), {
-    message: 'Nova senha deve conter letras e números.',
-  }),
+  currentPassword: z.string().min(1, 'Senha atual obrigatoria.'),
+  newPassword: passwordSchema,
 });
 
 const updateEmailSchema = z.object({
-  email: z.string().trim().email('E-mail inválido.'),
-  currentPassword: z.string().min(1, 'Senha atual obrigatória.'),
+  email: z.string().trim().email('E-mail invalido.'),
+  currentPassword: z.string().min(1, 'Senha atual obrigatoria.'),
 });
 
 function asyncHandler(
@@ -68,17 +56,17 @@ authRouter.post(
     const parsed = registerSchema.safeParse(req.body);
 
     if (!parsed.success) {
-      throw new ValidationError('Dados de cadastro inválidos.', { issues: parsed.error.flatten() });
+      throw new ValidationError('Dados de cadastro invalidos.', { issues: parsed.error.flatten() });
     }
 
     const { name, email, password } = parsed.data;
     const existingUser = await findUserByEmail(email);
 
     if (existingUser) {
-      throw new ConflictError('EMAIL_ALREADY_REGISTERED', 'Este e-mail já está em uso.');
+      throw new ConflictError('EMAIL_ALREADY_REGISTERED', 'Este e-mail ja esta em uso.');
     }
 
-    const { user, accessToken, refreshToken } = await registerUser({ name, email, password });
+    const { user, accessToken, refreshToken } = await registerUser({ name, email, password }, { requestId: req.requestId });
     setSessionCookies(res, accessToken, refreshToken);
 
     res.status(201).json({
@@ -97,11 +85,11 @@ authRouter.post(
     const parsed = loginSchema.safeParse(req.body);
 
     if (!parsed.success) {
-      throw new ValidationError('Dados de login inválidos.', { issues: parsed.error.flatten() });
+      throw new ValidationError('Dados de login invalidos.', { issues: parsed.error.flatten() });
     }
 
     const { email, password } = parsed.data;
-    const { user, accessToken, refreshToken } = await loginUser({ email, password });
+    const { user, accessToken, refreshToken } = await loginUser({ email, password }, { requestId: req.requestId });
     setSessionCookies(res, accessToken, refreshToken);
 
     res.json({
@@ -123,30 +111,8 @@ authRouter.post(
       throw new AuthError('AUTH_REQUIRED', 'Refresh token ausente.');
     }
 
-    const session = findRefreshSessionByToken(refreshTokenValue);
-
-    if (!session) {
-      throw new AuthError('INVALID_REFRESH_TOKEN', 'Refresh token inválido.');
-    }
-
-    if (session.expiresAt < Date.now()) {
-      throw new AuthError('REFRESH_TOKEN_EXPIRED', 'Refresh token expirado.');
-    }
-
-    const rotated = rotateRefreshToken(refreshTokenValue);
-
-    if (!rotated) {
-      throw new AuthError('REFRESH_TOKEN_REUSED', 'Refresh token reutilizado.');
-    }
-
-    const user = getUserById(session.userId);
-
-    if (!user || !user.isActive) {
-      throw new AuthError('ACCOUNT_DISABLED', 'Conta desativada.');
-    }
-
-    const accessToken = signAccessToken(user);
-    setSessionCookies(res, accessToken, rotated.tokenValue);
+    const { user, accessToken, refreshToken } = await refreshSession(refreshTokenValue, { requestId: req.requestId });
+    setSessionCookies(res, accessToken, refreshToken);
 
     res.json({
       success: true,
@@ -164,24 +130,7 @@ authRouter.post(
     const refreshTokenValue = typeof req.cookies?.refresh_token === 'string' ? req.cookies.refresh_token : undefined;
 
     if (refreshTokenValue) {
-      const session = findRefreshSessionByToken(refreshTokenValue);
-      if (session) {
-        const currentHash = hashToken(refreshTokenValue);
-        if (currentHash === session.tokenHash) {
-          const user = getUserById(session.userId);
-          if (user && user.isActive) {
-            // no-op; session is being revoked
-          }
-        }
-      }
-      const tokenHash = hashToken(refreshTokenValue);
-      const record = findRefreshSessionByToken(refreshTokenValue);
-      if (record) {
-        const session = record;
-        session.revokedAt = Date.now();
-        const refreshSessionMap = new Map<string, unknown>();
-        refreshSessionMap.set(tokenHash, session);
-      }
+      await revokeRefreshToken(refreshTokenValue, { requestId: req.requestId });
     }
 
     clearSessionCookies(res);
@@ -196,7 +145,7 @@ authRouter.get(
     const user = req.user;
 
     if (!user) {
-      throw new AuthError('AUTH_REQUIRED', 'Usuário não autenticado.');
+      throw new AuthError('AUTH_REQUIRED', 'Usuario nao autenticado.');
     }
 
     res.json({
@@ -215,24 +164,22 @@ authRouter.patch(
     const parsed = updateProfileSchema.safeParse(req.body);
 
     if (!parsed.success) {
-      throw new ValidationError('Dados inválidos para atualização do perfil.', { issues: parsed.error.flatten() });
+      throw new ValidationError('Dados invalidos para atualizacao do perfil.', { issues: parsed.error.flatten() });
     }
 
     const user = req.user;
     if (!user) {
-      throw new AuthError('AUTH_REQUIRED', 'Usuário não autenticado.');
+      throw new AuthError('AUTH_REQUIRED', 'Usuario nao autenticado.');
     }
 
-    if (parsed.data.name) {
-      user.name = parsed.data.name;
-      user.updatedAt = new Date().toISOString();
-      upsertUser(user);
-    }
+    const updatedUser = parsed.data.name
+      ? await updateUser(user.id, { name: parsed.data.name }, { actorId: user.id, requestId: req.requestId })
+      : user;
 
     res.json({
       success: true,
       data: {
-        user: sanitizeUser(user),
+        user: sanitizeUser(updatedUser ?? user),
       },
     });
   }),
@@ -245,12 +192,12 @@ authRouter.patch(
     const parsed = updateEmailSchema.safeParse(req.body);
 
     if (!parsed.success) {
-      throw new ValidationError('Dados inválidos para atualização de e-mail.', { issues: parsed.error.flatten() });
+      throw new ValidationError('Dados invalidos para atualizacao de e-mail.', { issues: parsed.error.flatten() });
     }
 
     const user = req.user;
     if (!user) {
-      throw new AuthError('AUTH_REQUIRED', 'Usuário não autenticado.');
+      throw new AuthError('AUTH_REQUIRED', 'Usuario nao autenticado.');
     }
 
     const isCurrentPasswordValid = await bcrypt.compare(parsed.data.currentPassword, user.passwordHash);
@@ -258,19 +205,19 @@ authRouter.patch(
       throw new AuthError('WRONG_CURRENT_PASSWORD', 'Senha atual incorreta.', { code: 'WRONG_CURRENT_PASSWORD' });
     }
 
-    const existingUser = getUserByEmail(parsed.data.email);
+    const existingUser = await findUserByEmail(parsed.data.email);
     if (existingUser && existingUser.id !== user.id) {
-      throw new ConflictError('EMAIL_ALREADY_REGISTERED', 'Este e-mail já está em uso.');
+      throw new ConflictError('EMAIL_ALREADY_REGISTERED', 'Este e-mail ja esta em uso.');
     }
 
-    user.email = parsed.data.email.toLowerCase();
-    user.updatedAt = new Date().toISOString();
-    upsertUser(user);
+    const updatedUser = await updateUser(user.id, {
+      email: parsed.data.email.toLowerCase(),
+    }, { actorId: user.id, requestId: req.requestId });
 
     res.json({
       success: true,
       data: {
-        user: sanitizeUser(user),
+        user: sanitizeUser(updatedUser ?? user),
       },
     });
   }),
@@ -283,12 +230,12 @@ authRouter.patch(
     const parsed = changePasswordSchema.safeParse(req.body);
 
     if (!parsed.success) {
-      throw new ValidationError('Dados inválidos para troca de senha.', { issues: parsed.error.flatten() });
+      throw new ValidationError('Dados invalidos para troca de senha.', { issues: parsed.error.flatten() });
     }
 
     const user = req.user;
     if (!user) {
-      throw new AuthError('AUTH_REQUIRED', 'Usuário não autenticado.');
+      throw new AuthError('AUTH_REQUIRED', 'Usuario nao autenticado.');
     }
 
     const isCurrentPasswordValid = await bcrypt.compare(parsed.data.currentPassword, user.passwordHash);
@@ -302,16 +249,16 @@ authRouter.patch(
       throw new AuthError('SAME_PASSWORD', 'A nova senha deve ser diferente da atual.');
     }
 
-    user.passwordHash = await bcrypt.hash(parsed.data.newPassword, appConfig.bcryptRounds);
-    user.passwordChangedAt = new Date().toISOString();
-    user.mustChangePassword = false;
-    user.updatedAt = new Date().toISOString();
-    upsertUser(user);
+    const updatedUser = await updateUser(user.id, {
+      passwordHash: await bcrypt.hash(parsed.data.newPassword, appConfig.bcryptRounds),
+      passwordChangedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      mustChangePassword: false,
+    }, { actorId: user.id, requestId: req.requestId });
 
     res.json({
       success: true,
       data: {
-        user: sanitizeUser(user),
+        user: sanitizeUser(updatedUser ?? user),
       },
     });
   }),

@@ -1,10 +1,10 @@
-import { type Request, type Response, Router } from 'express';
+import { type Response, Router } from 'express';
 import { z } from 'zod';
 import { Role } from '../domain/enums';
 import { ValidationError } from '../errors/app-error';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 import { createComment, deleteComment, getCommentByIdForValidation, listCommentsForTicket, updateComment } from '../services/comment.service';
-import { getTicketById } from '../auth/session';
+import { getTicket } from '../services/ticket.service';
 
 const commentRouter = Router();
 
@@ -39,7 +39,7 @@ commentRouter.get('/tickets/:id/comments', requireAuth, async (req: Authenticate
     throw new ValidationError('Identificador do ticket inválido.');
   }
 
-  const ticket = getTicketById(ticketId);
+  const ticket = await getTicket(ticketId);
   if (!ticket) {
     res.status(404).json({
       success: false,
@@ -84,7 +84,7 @@ commentRouter.post('/tickets/:id/comments', requireAuth, async (req: Authenticat
     throw new ValidationError('Identificador do ticket inválido.');
   }
 
-  const ticket = getTicketById(ticketId);
+  const ticket = await getTicket(ticketId);
   if (!ticket) {
     res.status(404).json({
       success: false,
@@ -136,6 +136,9 @@ commentRouter.post('/tickets/:id/comments', requireAuth, async (req: Authenticat
     authorId: req.user!.id,
     parentId: parsed.data.parentId ?? null,
     body: parsed.data.body,
+  }, {
+    actorId: req.user!.id,
+    requestId: req.requestId,
   });
 
   res.status(201).json({
@@ -180,7 +183,10 @@ commentRouter.patch('/comments/:id', requireAuth, async (req: AuthenticatedReque
     throw new ValidationError('Dados do comentário inválidos.', { issues: parsed.error.flatten() });
   }
 
-  const updated = await updateComment(commentId, parsed.data.body);
+  const updated = await updateComment(commentId, parsed.data.body, {
+    actorId: req.user?.id,
+    requestId: req.requestId,
+  });
 
   res.json({
     success: true,
@@ -219,7 +225,10 @@ commentRouter.delete('/comments/:id', requireAuth, async (req: AuthenticatedRequ
     return;
   }
 
-  const updated = await deleteComment(commentId);
+  const updated = await deleteComment(commentId, {
+    actorId: req.user?.id,
+    requestId: req.requestId,
+  });
 
   res.json({
     success: true,

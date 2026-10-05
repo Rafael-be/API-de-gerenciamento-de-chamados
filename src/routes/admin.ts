@@ -51,7 +51,10 @@ adminRouter.post('/admin/sectors', requireAuth, requireRole(Role.SUPERUSER), asy
     return;
   }
 
-  const sector = await adminCreateSector(parsed.data.name, parsed.data.isActive ?? true);
+  const sector = await adminCreateSector(parsed.data.name, parsed.data.isActive ?? true, {
+    actorId: req.user?.id,
+    requestId: req.requestId,
+  });
   res.status(201).json({
     success: true,
     data: sector,
@@ -66,7 +69,7 @@ adminRouter.get('/admin/sectors', requireAuth, requireRole(Role.SUPERUSER), asyn
   });
 });
 
-adminRouter.patch('/admin/sectors/:id', requireAuth, requireRole(Role.SUPERUSER), async (req: Request, res: Response) => {
+adminRouter.patch('/admin/sectors/:id', requireAuth, requireRole(Role.SUPERUSER), async (req: AuthenticatedRequest, res: Response) => {
   const sectorId = Number(req.params.id);
   const parsed = sectorSchema.safeParse(req.body);
 
@@ -89,6 +92,9 @@ adminRouter.patch('/admin/sectors/:id', requireAuth, requireRole(Role.SUPERUSER)
   const sector = await adminUpdateSector(sectorId, {
     name: parsed.data.name,
     isActive: parsed.data.isActive ?? true,
+  }, {
+    actorId: req.user?.id,
+    requestId: req.requestId,
   });
 
   if (!sector) {
@@ -110,7 +116,7 @@ adminRouter.get('/admin/technicians', requireAuth, requireRole(Role.SUPERUSER), 
   });
 });
 
-adminRouter.post('/admin/technicians', requireAuth, requireRole(Role.SUPERUSER), async (req: Request, res: Response) => {
+adminRouter.post('/admin/technicians', requireAuth, requireRole(Role.SUPERUSER), async (req: AuthenticatedRequest, res: Response) => {
   const parsed = technicianSchema.safeParse(req.body);
 
   if (!parsed.success) {
@@ -124,7 +130,7 @@ adminRouter.post('/admin/technicians', requireAuth, requireRole(Role.SUPERUSER),
     email,
     passwordHash,
     sectorId: sectorId ?? null,
-  });
+  }, { actorId: req.user?.id, requestId: req.requestId });
 
   res.status(201).json({
     success: true,
@@ -134,7 +140,7 @@ adminRouter.post('/admin/technicians', requireAuth, requireRole(Role.SUPERUSER),
   });
 });
 
-adminRouter.patch('/admin/technicians/:id/status', requireAuth, requireRole(Role.SUPERUSER), async (req: Request, res: Response) => {
+adminRouter.patch('/admin/technicians/:id/status', requireAuth, requireRole(Role.SUPERUSER), async (req: AuthenticatedRequest, res: Response) => {
   const parsed = patchStatusSchema.safeParse(req.body);
 
   if (!parsed.success) {
@@ -142,7 +148,10 @@ adminRouter.patch('/admin/technicians/:id/status', requireAuth, requireRole(Role
   }
 
   const userId = Number(req.params.id);
-  const user = await adminToggleTechnicianStatus(userId, parsed.data.isActive);
+  const user = await adminToggleTechnicianStatus(userId, parsed.data.isActive, {
+    actorId: req.user?.id,
+    requestId: req.requestId,
+  });
 
   if (!user || user.role !== Role.TECHNICIAN) {
     throw new NotFoundError('TECHNICIAN_NOT_FOUND', 'Técnico não encontrado.');
@@ -156,11 +165,14 @@ adminRouter.patch('/admin/technicians/:id/status', requireAuth, requireRole(Role
   });
 });
 
-adminRouter.patch('/admin/technicians/:id', requireAuth, requireRole(Role.SUPERUSER), async (req: Request, res: Response) => {
+adminRouter.patch('/admin/technicians/:id', requireAuth, requireRole(Role.SUPERUSER), async (req: AuthenticatedRequest, res: Response) => {
   const userId = Number(req.params.id);
   const rawSectorId = Number(req.body?.sectorId);
 
-  const user = await adminAssignTechnicianSector(userId, Number.isFinite(rawSectorId) && rawSectorId > 0 ? rawSectorId : null);
+  const user = await adminAssignTechnicianSector(userId, Number.isFinite(rawSectorId) && rawSectorId > 0 ? rawSectorId : null, {
+    actorId: req.user?.id,
+    requestId: req.requestId,
+  });
   if (!user || user.role !== Role.TECHNICIAN) {
     throw new NotFoundError('TECHNICIAN_NOT_FOUND', 'Técnico não encontrado.');
   }

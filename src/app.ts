@@ -8,10 +8,19 @@ import adminRouter from './routes/admin';
 import ticketRouter from './routes/tickets';
 import commentRouter from './routes/comments';
 import notificationRouter from './routes/notifications';
-import { AppError } from './errors/app-error';
+import { AppError, DatabaseError } from './errors/app-error';
 import { addRequestIdHeader, attachRequestId } from './middleware/security';
+import { pingDatabase } from './config/database';
 
-function createApp(): Express {
+export interface AppDependencies {
+  nodeEnv: string;
+  pingDatabase: typeof pingDatabase;
+}
+
+export function createApp(dependencies: AppDependencies = {
+  nodeEnv: appConfig.nodeEnv,
+  pingDatabase,
+}): Express {
   const app = express();
 
   app.disable('x-powered-by');
@@ -32,15 +41,24 @@ function createApp(): Express {
   app.use(express.json({ limit: '100kb' }));
   app.use(cookieParser());
 
-  app.get('/api/v1/health', (_req: Request, res: Response) => {
-    res.status(200).json({
-      success: true,
-      data: {
-        ok: true,
-        uptimeSeconds: Number(process.uptime().toFixed(2)),
-        timestamp: new Date().toISOString(),
-      },
-    });
+  app.get('/api/v1/health', async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (dependencies.nodeEnv !== 'test') {
+        await dependencies.pingDatabase();
+      }
+
+      res.status(200).json({
+        success: true,
+        data: {
+          ok: true,
+          database: dependencies.nodeEnv === 'test' ? 'skipped' : 'ok',
+          uptimeSeconds: Number(process.uptime().toFixed(2)),
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch {
+      next(new DatabaseError('Banco de dados indisponível.'));
+    }
   });
 
   app.get('/api/docs', (_req: Request, res: Response) => {

@@ -1,11 +1,8 @@
 import request from 'supertest';
 import app from '../../src/app';
-import {
-  createNotificationRecord,
-  createSectorRecord,
-  createUserRecord,
-  signAccessToken,
-} from '../../src/auth/session';
+import { signAccessToken } from '../../src/auth/session';
+import { createNotificationRecord, createSectorRecord, createUserRecord } from '../../src/repositories/fakes/test-state';
+import { consumeSocketTicket } from '../../src/services/notification.service';
 import { NotificationType, Role } from '../../src/domain/enums';
 
 describe('Notification routes', () => {
@@ -53,6 +50,8 @@ describe('Notification routes', () => {
     expect(socketTicket.body.success).toBe(true);
     expect(socketTicket.body.data.ticket).toEqual(expect.any(String));
     expect(socketTicket.body.data.expiresInSeconds).toBeGreaterThan(0);
+    expect(await consumeSocketTicket(socketTicket.body.data.ticket)).toBe(user.id);
+    expect(await consumeSocketTicket(socketTicket.body.data.ticket)).toBeNull();
 
     const read = await request(app)
       .patch(`/api/v1/notifications/${notification.id}/read`)

@@ -1,17 +1,14 @@
 import bcrypt from 'bcrypt';
+import type { Response } from 'express';
 import request from 'supertest';
 import app from '../../src/app';
 import {
-  createRefreshToken,
-  createUserRecord,
-  findRefreshSessionByToken,
-  revokeRefreshToken,
-  rotateRefreshToken,
   sanitizeUser,
   setSessionCookies,
   signAccessToken,
   verifyAccessToken,
 } from '../../src/auth/session';
+import { createRefreshToken, createUserRecord, findRefreshSessionByToken, revokeRefreshToken, rotateRefreshToken } from '../../src/repositories/fakes/test-state';
 import { appConfig } from '../../src/config/env';
 import { Role } from '../../src/domain/enums';
 import { requireAuth, requireRole } from '../../src/middleware/auth';
@@ -229,7 +226,7 @@ describe('Auth and session flow', () => {
     const res = {
       cookie: jest.fn(),
       clearCookie: jest.fn(),
-    } as any;
+    } as unknown as Response;
     const refresh = createRefreshToken(user.id);
     revokeRefreshToken(refresh.tokenValue);
     setSessionCookies(res, accessToken, refresh.tokenValue);
@@ -319,6 +316,7 @@ describe('Auth and session flow', () => {
     const userReq = { headers: { authorization: `Bearer ${signAccessToken(nodeUser)}` }, cookies: {} } as Record<string, unknown>;
     const userNext = jest.fn();
     requireAuth(userReq as never, {} as never, userNext);
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect((userReq as { user?: unknown }).user).toEqual(expect.objectContaining({ id: nodeUser.id, role: Role.CLIENT }));
 
     const roleReq = { user: nodeUser } as Record<string, unknown>;
@@ -332,6 +330,7 @@ describe('Auth and session flow', () => {
     } as Record<string, unknown>;
     const missingUserNext = jest.fn();
     requireAuth(missingUserReq as never, {} as never, missingUserNext);
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(missingUserNext).toHaveBeenCalledWith(expect.objectContaining({ code: 'AUTH_REQUIRED' }));
 
     const disabledUser = createUserRecord({
@@ -347,6 +346,7 @@ describe('Auth and session flow', () => {
     } as Record<string, unknown>;
     const disabledNext = jest.fn();
     requireAuth(disabledReq as never, {} as never, disabledNext);
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(disabledNext).toHaveBeenCalledWith(expect.objectContaining({ code: 'ACCOUNT_DISABLED' }));
 
     const missingRoleReq = {} as Record<string, unknown>;

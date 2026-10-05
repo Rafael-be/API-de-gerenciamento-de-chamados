@@ -1,4 +1,4 @@
-import { type Request, type Response, Router } from 'express';
+import { type Response, Router } from 'express';
 import { z } from 'zod';
 import {
   cancelTicket,
@@ -12,9 +12,10 @@ import {
   assumeTicket,
   updateTicket,
 } from '../services/ticket.service';
-import { NotificationType, Role, TicketStatus } from '../domain/enums';
+import { Role, TicketStatus } from '../domain/enums';
 import { ValidationError } from '../errors/app-error';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
+import { ticketRepository } from '../repositories';
 
 const ticketRouter = Router();
 
@@ -74,6 +75,9 @@ ticketRouter.post('/tickets', requireAuth, async (req: AuthenticatedRequest, res
     sectorId: req.user.sectorId,
     title: parsed.data.title,
     description: parsed.data.description,
+  }, {
+    actorId: req.user.id,
+    requestId: req.requestId,
   });
 
   res.status(201).json({
@@ -146,9 +150,9 @@ ticketRouter.get('/technician/tickets', requireAuth, async (req: AuthenticatedRe
   let items: Awaited<ReturnType<typeof listOpenTickets>> = [];
 
   if (view === 'mine') {
-    items = (await listTicketsForClient(req.user.id)).filter((ticket) => ticket.status === TicketStatus.IN_PROGRESS || ticket.status === TicketStatus.RESOLVED);
+    items = (await ticketRepository.findByTechnician(req.user.id)).filter((ticket) => ticket.status === TicketStatus.IN_PROGRESS || ticket.status === TicketStatus.RESOLVED);
   } else if (view === 'done') {
-    items = (await listTicketsForClient(req.user.id)).filter((ticket) => ticket.status === TicketStatus.RESOLVED);
+    items = (await ticketRepository.findByTechnician(req.user.id)).filter((ticket) => ticket.status === TicketStatus.RESOLVED);
   } else {
     items = await listOpenTickets();
   }
@@ -251,7 +255,7 @@ ticketRouter.patch('/tickets/:id', requireAuth, async (req: AuthenticatedRequest
   const updated = await updateTicket(ticketId, {
     ...(parsed.data.title !== undefined ? { title: parsed.data.title } : {}),
     ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
-  });
+  }, { actorId: req.user.id, requestId: req.requestId });
 
   res.json({
     success: true,
@@ -277,7 +281,7 @@ ticketRouter.post('/tickets/:id/cancel', requireAuth, async (req: AuthenticatedR
   }
 
   if (req.user?.role === Role.CLIENT && ensureOwner(ticket, req.user.id)) {
-    const updated = await cancelTicket(ticketId, req.user.id);
+    const updated = await cancelTicket(ticketId, req.user.id, req.requestId);
 
     res.json({
       success: true,
@@ -334,7 +338,7 @@ ticketRouter.post('/tickets/:id/assume', requireAuth, async (req: AuthenticatedR
     return;
   }
 
-  const updated = await assumeTicket(ticketId, req.user.id);
+  const updated = await assumeTicket(ticketId, req.user.id, req.requestId);
 
   res.json({
     success: true,
@@ -379,7 +383,7 @@ ticketRouter.post('/tickets/:id/return', requireAuth, async (req: AuthenticatedR
     return;
   }
 
-  const updated = await returnTicket(ticket.id, req.user.id);
+  const updated = await returnTicket(ticket.id, req.user.id, req.requestId);
 
   res.json({
     success: true,
@@ -429,7 +433,7 @@ ticketRouter.post('/tickets/:id/finish', requireAuth, async (req: AuthenticatedR
     return;
   }
 
-  const updated = await finishTicket(ticket.id, req.user.id, parsed.data.resolutionNote ?? undefined);
+  const updated = await finishTicket(ticket.id, req.user.id, parsed.data.resolutionNote ?? undefined, req.requestId);
 
   res.json({
     success: true,

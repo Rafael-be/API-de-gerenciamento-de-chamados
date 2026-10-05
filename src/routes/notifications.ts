@@ -50,7 +50,10 @@ notificationRouter.patch('/notifications/:id/read', requireAuth, async (req: Aut
     return;
   }
 
-  const notification = await readNotification(notificationId.data, req.user!.id);
+  const notification = await readNotification(notificationId.data, req.user!.id, {
+    actorId: req.user!.id,
+    requestId: req.requestId,
+  });
   if (!notification) {
     res.status(404).json({
       success: false,
@@ -71,7 +74,10 @@ notificationRouter.patch('/notifications/:id/read', requireAuth, async (req: Aut
 });
 
 notificationRouter.patch('/notifications/read-all', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const updatedCount = await readAllNotifications(req.user!.id);
+  const updatedCount = await readAllNotifications(req.user!.id, {
+    actorId: req.user!.id,
+    requestId: req.requestId,
+  });
 
   res.json({
     success: true,
@@ -82,7 +88,7 @@ notificationRouter.patch('/notifications/read-all', requireAuth, async (req: Aut
 });
 
 notificationRouter.post('/notifications/socket-ticket', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const ticket = await issueSocketTicketForUser(req.user!.id);
+  const ticket = await issueSocketTicketForUser(req.user!.id, req.requestId);
 
   res.json({
     success: true,

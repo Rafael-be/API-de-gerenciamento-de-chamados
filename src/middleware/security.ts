@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import { RateLimitError } from '../errors/app-error';
 
 declare global {
+  // Express request augmentation requires a namespace declaration.
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       requestId: string;
@@ -10,7 +12,7 @@ declare global {
   }
 }
 
-const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+const rateLimitStore: Record<string, { count: number; resetAt: number }> = Object.create(null) as Record<string, { count: number; resetAt: number }>;
 
 export function attachRequestId(req: Request, _res: Response, next: NextFunction): void {
   req.requestId = (req.get('x-request-id') ?? crypto.randomUUID()).toString();
@@ -26,7 +28,7 @@ export function createRateLimiter(maxRequests: number, windowMs: number, keyFact
   return (req: Request, _res: Response, next: NextFunction): void => {
     const key = keyFactory(req);
     const now = Date.now();
-    const record = rateLimitStore.get(key);
+    const record = rateLimitStore[key];
 
     if (record && record.resetAt > now) {
       if (record.count >= maxRequests) {
@@ -39,7 +41,7 @@ export function createRateLimiter(maxRequests: number, windowMs: number, keyFact
       return;
     }
 
-    rateLimitStore.set(key, { count: 1, resetAt: now + windowMs });
+    rateLimitStore[key] = { count: 1, resetAt: now + windowMs };
     next();
   };
 }

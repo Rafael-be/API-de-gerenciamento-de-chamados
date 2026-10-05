@@ -1,6 +1,7 @@
 import { NotificationType } from '../domain/enums';
 import type { TicketComment } from '../domain/models';
 import { commentRepository, notificationRepository, ticketRepository } from '../repositories';
+import type { UnitOfWorkContext } from '../repositories/unit-of-work';
 
 export async function getCommentByIdForValidation(commentId: number): Promise<TicketComment | null> {
   return commentRepository.findById(commentId);
@@ -10,7 +11,7 @@ export async function listCommentsForTicket(ticketId: number): Promise<TicketCom
   return commentRepository.findByTicket(ticketId);
 }
 
-export async function createComment(input: { ticketId: number; authorId: number; body: string; parentId?: number | null }): Promise<TicketComment> {
+export async function createComment(input: { ticketId: number; authorId: number; body: string; parentId?: number | null }, context: UnitOfWorkContext = {}): Promise<TicketComment> {
   const parentId = input.parentId ?? null;
   if (parentId !== null) {
     const parent = await commentRepository.findById(parentId);
@@ -23,15 +24,15 @@ export async function createComment(input: { ticketId: number; authorId: number;
     authorId: input.authorId,
     parentId,
     body: input.body,
-  });
+  }, context);
 
   const ticket = await ticketRepository.findById(input.ticketId);
   if (ticket) {
-    const targets = new Set<number>();
+    const targets: number[] = [];
     const otherUserId = ticket.clientId === input.authorId ? ticket.technicianId : ticket.clientId;
-    if (otherUserId !== null) targets.add(otherUserId);
-    if (ticket.technicianId !== null && ticket.technicianId !== input.authorId) targets.add(ticket.technicianId);
-    if (ticket.clientId !== input.authorId) targets.add(ticket.clientId);
+    if (otherUserId !== null) targets.push(otherUserId);
+    if (ticket.technicianId !== null && ticket.technicianId !== input.authorId && !targets.includes(ticket.technicianId)) targets.push(ticket.technicianId);
+    if (ticket.clientId !== input.authorId && !targets.includes(ticket.clientId)) targets.push(ticket.clientId);
 
     for (const targetUserId of targets) {
       await notificationRepository.create({
@@ -41,17 +42,17 @@ export async function createComment(input: { ticketId: number; authorId: number;
         commentId: comment.id,
         actorId: input.authorId,
         message: `Novo comentário no chamado "${ticket.title}".`,
-      });
+      }, context);
     }
   }
 
   return comment;
 }
 
-export async function updateComment(commentId: number, body: string): Promise<TicketComment | null> {
-  return commentRepository.update(commentId, { body, editedAt: new Date().toISOString() });
+export async function updateComment(commentId: number, body: string, context: UnitOfWorkContext = {}): Promise<TicketComment | null> {
+  return commentRepository.update(commentId, { body, editedAt: new Date().toISOString().slice(0, 19).replace('T', ' ') }, context);
 }
 
-export async function deleteComment(commentId: number): Promise<TicketComment | null> {
-  return commentRepository.delete(commentId);
+export async function deleteComment(commentId: number, context: UnitOfWorkContext = {}): Promise<TicketComment | null> {
+  return commentRepository.delete(commentId, context);
 }

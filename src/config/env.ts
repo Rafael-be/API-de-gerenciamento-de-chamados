@@ -1,7 +1,15 @@
 import * as dotenv from 'dotenv';
+import path from 'node:path';
 import { z } from 'zod';
 
-dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, '../../.env'), quiet: true });
+
+const defaultSecrets = {
+  DB_PASSWORD: 'dev-db-password',
+  JWT_ACCESS_SECRET: 'dev-access-secret-change-me',
+  SUPERUSER_PASSWORD: 'DevSuperuserPassword123',
+  DEFAULT_RESET_PASSWORD: 'DevResetPassword123',
+} as const;
 
 const booleanFromEnv = z.preprocess(
   (value) => {
@@ -92,10 +100,17 @@ export function loadEnv(env: Record<string, string | undefined> = process.env): 
   if (parsed.NODE_ENV === 'production') {
     const requiredProductionKeys = ['DB_PASSWORD', 'JWT_ACCESS_SECRET', 'SUPERUSER_PASSWORD', 'DEFAULT_RESET_PASSWORD'] as const;
     const missingKeys = requiredProductionKeys.filter((key) => !env[key] || env[key]!.trim() === '');
+    const defaultKeys = requiredProductionKeys.filter((key) => parsed[key] === defaultSecrets[key]);
 
     if (missingKeys.length > 0) {
       throw new Error(
         `Production environment requires explicit values for: ${missingKeys.join(', ')}.`,
+      );
+    }
+
+    if (defaultKeys.length > 0) {
+      throw new Error(
+        `Production environment cannot use default secret values for: ${defaultKeys.join(', ')}.`,
       );
     }
   }

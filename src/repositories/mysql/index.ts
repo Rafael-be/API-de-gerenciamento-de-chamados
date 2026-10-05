@@ -4,4 +4,6 @@ export { ticketRepository } from './ticket.repository';
 export { commentRepository } from './comment.repository';
 export { notificationRepository } from './notification.repository';
 export { refreshTokenRepository } from './refresh-token.repository';
+export { socketTicketRepository } from './socket-ticket.repository';
 export { auditLogRepository } from './audit.repository';
+export { unitOfWork } from '../unit-of-work';

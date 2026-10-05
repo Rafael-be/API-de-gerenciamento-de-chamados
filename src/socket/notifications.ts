@@ -1,8 +1,8 @@
 import http from 'node:http';
 import { Server as SocketIOServer } from 'socket.io';
 import { appConfig } from '../config/env';
-import { verifySocketTicket } from '../auth/session';
 import type { Notification } from '../domain/models';
+import { consumeSocketTicket } from '../services/notification.service';
 
 let socketServer: SocketIOServer | null = null;
 
@@ -26,16 +26,15 @@ export function attachSocketServer(httpServer: http.Server): SocketIOServer {
       return;
     }
 
-    const userId = verifySocketTicket(ticket);
-
-    if (userId === null) {
-      next(new Error('INVALID_SOCKET_TICKET'));
-      return;
-    }
-
-    socket.data.userId = userId;
-    socket.join(`user:${userId}`);
-    next();
+    void consumeSocketTicket(ticket).then((userId) => {
+      if (userId === null) {
+        next(new Error('INVALID_SOCKET_TICKET'));
+        return;
+      }
+      socket.data.userId = userId;
+      socket.join(`user:${userId}`);
+      next();
+    }).catch(next);
   });
 
   io.on('connection', (socket) => {

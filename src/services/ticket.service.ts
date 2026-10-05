@@ -1,10 +1,32 @@
-import crypto from 'node:crypto';
-import { NotificationType, Role, TicketStatus } from '../domain/enums';
+import { NotificationType, TicketStatus } from '../domain/enums';
 import type { Ticket } from '../domain/models';
-import { ValidationError } from '../errors/app-error';
+import { AppError, createAppError, ValidationError } from '../errors/app-error';
 import { notificationRepository, ticketRepository, userRepository } from '../repositories';
+import type { UnitOfWorkContext } from '../repositories/unit-of-work';
 
-export async function createTicket(input: { clientId: number; sectorId: number | null; title: string; description: string }): Promise<Ticket> {
+function mapProcedureError(error: unknown): never {
+  const message = typeof error === 'object' && error !== null && 'sqlMessage' in error
+    ? String(error.sqlMessage)
+    : error instanceof Error
+      ? error.message
+      : '';
+  const code = /(?:^|: )([A-Z_]+)$/.exec(message)?.[1];
+  const messages: Record<string, { message: string; status: number }> = {
+    TICKET_NOT_FOUND: { message: 'Chamado não encontrado.', status: 404 },
+    NOT_TICKET_OWNER: { message: 'Você não pode cancelar este chamado.', status: 403 },
+    NOT_ASSIGNED_TECHNICIAN: { message: 'Este chamado não está atribuído a você.', status: 403 },
+    TICKET_INVALID_TRANSITION: { message: 'A situação atual não permite esta operação.', status: 400 },
+    TICKET_ALREADY_ASSUMED: { message: 'Este chamado já foi assumido.', status: 409 },
+    TICKET_ALREADY_RESOLVED: { message: 'Este chamado já foi concluído.', status: 409 },
+  };
+  if (code && messages[code]) {
+    throw createAppError(code, messages[code].message, messages[code].status);
+  }
+  if (error instanceof AppError) throw error;
+  throw error;
+}
+
+export async function createTicket(input: { clientId: number; sectorId: number | null; title: string; description: string }, context: UnitOfWorkContext = {}): Promise<Ticket> {
   return ticketRepository.create({
     clientId: input.clientId,
     technicianId: null,
@@ -16,7 +38,7 @@ export async function createTicket(input: { clientId: number; sectorId: number |
     assumedAt: null,
     resolvedAt: null,
     cancelledAt: null,
-  } as any);
+  }, context);
 }
 
 export async function listTicketsForClient(clientId: number): Promise<Ticket[]> {
@@ -38,20 +60,25 @@ export async function getTicket(ticketId: number): Promise<Ticket | null> {
   return ticketRepository.findById(ticketId);
 }
 
-export async function updateTicket(ticketId: number, patch: Partial<Ticket>): Promise<Ticket | null> {
-  return ticketRepository.update(ticketId, patch);
+export async function updateTicket(ticketId: number, patch: Partial<Ticket>, context: UnitOfWorkContext = {}): Promise<Ticket | null> {
+  return ticketRepository.update(ticketId, patch, context);
 }
 
-export async function assumeTicket(ticketId: number, technicianId: number): Promise<Ticket> {
+export async function assumeTicket(ticketId: number, technicianId: number, requestId?: string): Promise<Ticket> {
   const ticket = await ticketRepository.findById(ticketId);
   if (!ticket) throw new ValidationError('Chamado não encontrado.', { code: 'TICKET_NOT_FOUND' });
   if (ticket.status !== TicketStatus.OPEN) throw new ValidationError('Somente chamados abertos podem ser assumidos.', { code: 'INVALID_TICKET_STATE' });
 
-  const ticketUpdated = await ticketRepository.update(ticketId, {
-    technicianId,
-    status: TicketStatus.IN_PROGRESS,
-    assumedAt: new Date().toISOString(),
-  });
+  let ticketUpdated: Ticket | null;
+  try {
+    await ticketRepository.runLifecycleProcedure('sp_assume_ticket', [ticketId, technicianId], {
+      actorId: technicianId,
+      requestId,
+    });
+    ticketUpdated = await ticketRepository.findById(ticketId);
+  } catch (error) {
+    mapProcedureError(error);
+  }
 
   if (ticketUpdated) {
     const client = await userRepository.findById(ticket.clientId);
@@ -62,25 +89,30 @@ export async function assumeTicket(ticketId: number, technicianId: number): Prom
         ticketId: ticketUpdated.id,
         actorId: technicianId,
         message: `Chamado assumido por ${techName(technicianId)}.`,
-      });
+      }, { actorId: technicianId, requestId });
     }
   }
 
   return ticketUpdated as Ticket;
 }
 
-export async function returnTicket(ticketId: number, technicianId: number): Promise<Ticket> {
+export async function returnTicket(ticketId: number, technicianId: number, requestId?: string): Promise<Ticket> {
   const ticket = await ticketRepository.findById(ticketId);
   if (!ticket) throw new ValidationError('Chamado não encontrado.', { code: 'TICKET_NOT_FOUND' });
   if (ticket.technicianId !== technicianId || ticket.status !== TicketStatus.IN_PROGRESS) {
     throw new ValidationError('Este chamado não pode ser devolvido neste estado.', { code: 'INVALID_TICKET_STATE' });
   }
 
-  const updated = await ticketRepository.update(ticketId, {
-    technicianId: null,
-    status: TicketStatus.OPEN,
-    assumedAt: null,
-  });
+  let updated: Ticket | null;
+  try {
+    await ticketRepository.runLifecycleProcedure('sp_return_ticket', [ticketId, technicianId], {
+      actorId: technicianId,
+      requestId,
+    });
+    updated = await ticketRepository.findById(ticketId);
+  } catch (error) {
+    mapProcedureError(error);
+  }
 
   if (updated) {
     await notificationRepository.create({
@@ -89,24 +121,29 @@ export async function returnTicket(ticketId: number, technicianId: number): Prom
       ticketId: updated.id,
       actorId: technicianId,
       message: `Técnico retornou o chamado para a fila.`,
-    });
+    }, { actorId: technicianId, requestId });
   }
 
   return updated as Ticket;
 }
 
-export async function finishTicket(ticketId: number, technicianId: number, resolutionNote?: string): Promise<Ticket> {
+export async function finishTicket(ticketId: number, technicianId: number, resolutionNote?: string, requestId?: string): Promise<Ticket> {
   const ticket = await ticketRepository.findById(ticketId);
   if (!ticket) throw new ValidationError('Chamado não encontrado.', { code: 'TICKET_NOT_FOUND' });
   if (ticket.technicianId !== technicianId || ticket.status !== TicketStatus.IN_PROGRESS) {
     throw new ValidationError('Somente chamados em andamento por você podem ser finalizados.', { code: 'INVALID_TICKET_STATE' });
   }
 
-  const updated = await ticketRepository.update(ticketId, {
-    status: TicketStatus.RESOLVED,
-    resolutionNote: resolutionNote ?? null,
-    resolvedAt: new Date().toISOString(),
-  });
+  let updated: Ticket | null;
+  try {
+    await ticketRepository.runLifecycleProcedure('sp_finish_ticket', [ticketId, technicianId, resolutionNote ?? null], {
+      actorId: technicianId,
+      requestId,
+    });
+    updated = await ticketRepository.findById(ticketId);
+  } catch (error) {
+    mapProcedureError(error);
+  }
 
   if (updated) {
     await notificationRepository.create({
@@ -115,22 +152,27 @@ export async function finishTicket(ticketId: number, technicianId: number, resol
       ticketId: updated.id,
       actorId: technicianId,
       message: 'Chamado concluído com sucesso.',
-    });
+    }, { actorId: technicianId, requestId });
   }
 
   return updated as Ticket;
 }
 
-export async function cancelTicket(ticketId: number, clientId: number): Promise<Ticket> {
+export async function cancelTicket(ticketId: number, clientId: number, requestId?: string): Promise<Ticket> {
   const ticket = await ticketRepository.findById(ticketId);
   if (!ticket) throw new ValidationError('Chamado não encontrado.', { code: 'TICKET_NOT_FOUND' });
   if (ticket.clientId !== clientId) throw new ValidationError('Você não pode cancelar este chamado.', { code: 'FORBIDDEN' });
 
-  const updated = await ticketRepository.update(ticketId, {
-    status: TicketStatus.CANCELLED,
-    cancelledAt: new Date().toISOString(),
-    technicianId: ticket.technicianId && ticket.status === TicketStatus.IN_PROGRESS ? null : ticket.technicianId,
-  });
+  let updated: Ticket | null;
+  try {
+    await ticketRepository.runLifecycleProcedure('sp_cancel_ticket', [ticketId, clientId], {
+      actorId: clientId,
+      requestId,
+    });
+    updated = await ticketRepository.findById(ticketId);
+  } catch (error) {
+    mapProcedureError(error);
+  }
 
   if (updated) {
     await notificationRepository.create({
@@ -139,7 +181,7 @@ export async function cancelTicket(ticketId: number, clientId: number): Promise<
       ticketId: updated.id,
       actorId: clientId,
       message: 'Chamado cancelado.',
-    });
+    }, { actorId: clientId, requestId });
   }
 
   return updated as Ticket;

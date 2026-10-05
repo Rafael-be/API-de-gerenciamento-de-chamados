@@ -18,7 +18,7 @@ import {
   upsertSector,
   upsertTicket,
   upsertUser,
-} from '../../auth/session';
+} from './test-state';
 import { NotificationType, Role, TicketStatus, UserStatus } from '../../domain/enums';
 import type { Notification, Sector, Ticket, TicketComment, User } from '../../domain/models';
 
@@ -28,6 +28,7 @@ const tickets = new Map<number, Ticket>();
 const comments = new Map<number, TicketComment>();
 const notifications = new Map<number, Notification>();
 const refreshTokens = new Map<string, { id: number; userId: number; familyId: string; tokenHash: string; expiresAt: Date; revokedAt: Date | null; rotatedAt: Date | null; createdAt: Date; }>();
+const socketTickets = new Map<string, { userId: number; expiresAt: Date; consumed: boolean }>();
 
 let nextUserId = 1000;
 let nextSectorId = 2000;
@@ -71,10 +72,10 @@ export const userRepository = {
     return Array.from(users.values()).filter((user) => user.role === role);
   },
 
-  async create(input: Partial<User> & { email: string; passwordHash: string; role: Role }): Promise<User> {
+  async create(input: Omit<Partial<User>, 'name'> & { name: string; email: string; passwordHash: string; role: Role }, _context?: { actorId?: number | null; requestId?: string | null }): Promise<User> {
     const user: User = {
       id: nextNumericId('user'),
-      name: input.name ?? 'Usuário',
+      name: input.name,
       email: input.email.toLowerCase(),
       passwordHash: input.passwordHash,
       role: input.role,
@@ -92,8 +93,8 @@ export const userRepository = {
     return user;
   },
 
-  async update(id: number, patch: Partial<User>): Promise<User | null> {
-    const existing = users.get(id);
+  async update(id: number, patch: Partial<User>, _context?: { actorId?: number | null; requestId?: string | null }): Promise<User | null> {
+    const existing = users.get(id) ?? getUserById(id);
     if (!existing) return null;
     const updated: User = {
       ...existing,
@@ -106,6 +107,20 @@ export const userRepository = {
     users.set(id, updated);
     upsertUser(updated);
     return updated;
+  },
+
+  async deactivateTechnician(
+    id: number,
+    _context: { actorId?: number | null; requestId?: string | null } = {},
+  ): Promise<void> {
+    const user = await this.findById(id);
+    if (!user) throw new Error('USER_NOT_FOUND');
+    await this.update(id, { isActive: false, status: UserStatus.INACTIVE });
+    for (const ticket of tickets.values()) {
+      if (ticket.technicianId === id && ticket.status === TicketStatus.IN_PROGRESS) {
+        await ticketRepository.update(ticket.id, { technicianId: null, status: TicketStatus.OPEN, assumedAt: null });
+      }
+    }
   },
 };
 
@@ -122,7 +137,7 @@ export const sectorRepository = {
     return listAllSectors().length ? listAllSectors() : Array.from(sectors.values()).sort((a, b) => a.id - b.id);
   },
 
-  async create(name: string, isActive = true): Promise<Sector> {
+  async create(name: string, isActive = true, _context?: { actorId?: number | null; requestId?: string | null }): Promise<Sector> {
     const sector: Sector = {
       id: nextNumericId('sector'),
       name,
@@ -135,7 +150,7 @@ export const sectorRepository = {
     return sector;
   },
 
-  async update(id: number, patch: Partial<Sector>): Promise<Sector | null> {
+  async update(id: number, patch: Partial<Sector>, _context?: { actorId?: number | null; requestId?: string | null }): Promise<Sector | null> {
     const existing = sectors.get(id);
     if (!existing) return null;
     const updated: Sector = { ...existing, ...patch, updatedAt: new Date().toISOString() };
@@ -143,6 +158,7 @@ export const sectorRepository = {
     upsertSector({ ...updated, createdAt: updated.createdAt, updatedAt: updated.updatedAt });
     return updated;
   },
+
 };
 
 export const ticketRepository = {
@@ -164,7 +180,13 @@ export const ticketRepository = {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
 
-  async create(input: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt'>): Promise<Ticket> {
+  async findByTechnician(technicianId: number): Promise<Ticket[]> {
+    return Array.from(tickets.values())
+      .filter((ticket) => ticket.technicianId === technicianId)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  },
+
+  async create(input: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt'>, _context?: { actorId?: number | null; requestId?: string | null }): Promise<Ticket> {
     const ticket: Ticket = {
       id: nextNumericId('ticket'),
       ...input,
@@ -176,13 +198,45 @@ export const ticketRepository = {
     return ticket;
   },
 
-  async update(id: number, patch: Partial<Ticket>): Promise<Ticket | null> {
+  async update(id: number, patch: Partial<Ticket>, _context?: { actorId?: number | null; requestId?: string | null }): Promise<Ticket | null> {
     const existing = tickets.get(id);
     if (!existing) return null;
     const updated: Ticket = { ...existing, ...patch, updatedAt: new Date().toISOString() };
     tickets.set(id, updated);
     upsertTicket(updated);
     return updated;
+  },
+
+  async runLifecycleProcedure(
+    procedure: 'sp_assume_ticket' | 'sp_return_ticket' | 'sp_finish_ticket' | 'sp_cancel_ticket',
+    parameters: Array<number | string | null>,
+    _context?: { actorId?: number | null; requestId?: string | null },
+  ): Promise<void> {
+    const ticketId = Number(parameters[0]);
+    const actorId = Number(parameters[1]);
+    const ticket = await this.findById(ticketId);
+    if (!ticket) throw new Error('TICKET_NOT_FOUND');
+
+    if (procedure === 'sp_assume_ticket') {
+      if (ticket.status !== TicketStatus.OPEN) throw new Error('TICKET_INVALID_TRANSITION');
+      await this.update(ticketId, { technicianId: actorId, status: TicketStatus.IN_PROGRESS, assumedAt: new Date().toISOString() });
+    } else if (procedure === 'sp_return_ticket') {
+      if (ticket.technicianId !== actorId) throw new Error('NOT_ASSIGNED_TECHNICIAN');
+      if (ticket.status !== TicketStatus.IN_PROGRESS) throw new Error('TICKET_INVALID_TRANSITION');
+      await this.update(ticketId, { technicianId: null, status: TicketStatus.OPEN, assumedAt: null });
+    } else if (procedure === 'sp_finish_ticket') {
+      if (ticket.technicianId !== actorId) throw new Error('NOT_ASSIGNED_TECHNICIAN');
+      if (ticket.status !== TicketStatus.IN_PROGRESS) throw new Error('TICKET_ALREADY_RESOLVED');
+      await this.update(ticketId, { status: TicketStatus.RESOLVED, resolutionNote: String(parameters[2] ?? '') || null, resolvedAt: new Date().toISOString() });
+    } else {
+      if (ticket.clientId !== actorId) throw new Error('NOT_TICKET_OWNER');
+      if (ticket.status !== TicketStatus.OPEN && ticket.status !== TicketStatus.IN_PROGRESS) throw new Error('TICKET_INVALID_TRANSITION');
+      await this.update(ticketId, {
+        status: TicketStatus.CANCELLED,
+        cancelledAt: new Date().toISOString(),
+        technicianId: ticket.status === TicketStatus.IN_PROGRESS ? null : ticket.technicianId,
+      });
+    }
   },
 };
 
@@ -198,7 +252,7 @@ export const commentRepository = {
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   },
 
-  async create(input: Partial<TicketComment> & { ticketId: number; authorId: number; body: string }): Promise<TicketComment> {
+  async create(input: Partial<TicketComment> & { ticketId: number; authorId: number; body: string }, _context?: { actorId?: number | null; requestId?: string | null }): Promise<TicketComment> {
     const comment: TicketComment = {
       id: nextNumericId('comment'),
       ticketId: input.ticketId,
@@ -214,7 +268,7 @@ export const commentRepository = {
     return comment;
   },
 
-  async update(id: number, patch: Partial<TicketComment>): Promise<TicketComment | null> {
+  async update(id: number, patch: Partial<TicketComment>, _context?: { actorId?: number | null; requestId?: string | null }): Promise<TicketComment | null> {
     const existing = comments.get(id);
     if (!existing) return null;
     const updated: TicketComment = { ...existing, ...patch };
@@ -223,7 +277,7 @@ export const commentRepository = {
     return updated;
   },
 
-  async delete(id: number): Promise<TicketComment | null> {
+  async delete(id: number, _context?: { actorId?: number | null; requestId?: string | null }): Promise<TicketComment | null> {
     const existing = comments.get(id);
     if (!existing) return null;
     const updated: TicketComment = { ...existing, deletedAt: new Date().toISOString() };
@@ -246,7 +300,7 @@ export const notificationRepository = {
     return sessionUnread > 0 ? sessionUnread : Array.from(notifications.values()).filter((notification) => notification.userId === userId && !notification.isRead).length;
   },
 
-  async create(input: Partial<Notification> & { userId: number; type: NotificationType; message: string }): Promise<Notification> {
+  async create(input: Partial<Notification> & { userId: number; type: NotificationType; message: string }, _context?: { actorId?: number | null; requestId?: string | null }): Promise<Notification> {
     const notification: Notification = {
       id: nextNumericId('notification'),
       userId: input.userId,
@@ -269,7 +323,7 @@ export const notificationRepository = {
     return sessionItem ?? notifications.get(id) ?? null;
   },
 
-  async markRead(id: number, userId: number): Promise<Notification | null> {
+  async markRead(id: number, userId: number, _context?: { actorId?: number | null; requestId?: string | null }): Promise<Notification | null> {
     const existing = notifications.get(id) ?? listNotificationsForUser(userId).find((notification) => notification.id === id) ?? null;
     if (!existing || existing.userId !== userId) return null;
     const updated: Notification = { ...existing, isRead: true, readAt: new Date().toISOString() };
@@ -279,7 +333,7 @@ export const notificationRepository = {
     return updated;
   },
 
-  async markAllRead(userId: number): Promise<number> {
+  async markAllRead(userId: number, _context?: { actorId?: number | null; requestId?: string | null }): Promise<number> {
     const sessionCount = markAllNotificationsReadForUser(userId);
     let count = 0;
     for (const [id, notification] of notifications.entries()) {
@@ -295,7 +349,7 @@ export const notificationRepository = {
 };
 
 export const refreshTokenRepository = {
-  async create(userId: number, familyId: string, tokenHash: string, expiresAt: Date): Promise<{ id: number }> {
+  async create(userId: number, familyId: string, tokenHash: string, expiresAt: Date, _context?: { actorId?: number | null; requestId?: string | null }): Promise<{ id: number }> {
     const record = {
       id: nextRefreshTokenId++,
       userId,
@@ -316,12 +370,30 @@ export const refreshTokenRepository = {
     return { ...record };
   },
 
-  async revoke(id: number): Promise<void> {
+  async revoke(id: number, _context?: { actorId?: number | null; requestId?: string | null }): Promise<void> {
     for (const record of refreshTokens.values()) {
       if (record.id === id) {
         record.revokedAt = new Date();
       }
     }
+  },
+};
+
+export const socketTicketRepository = {
+  async create(
+    userId: number,
+    ticketHash: string,
+    expiresAt: Date,
+    _context?: { actorId?: number | null; requestId?: string | null },
+  ): Promise<void> {
+    socketTickets.set(ticketHash, { userId, expiresAt, consumed: false });
+  },
+
+  async consume(ticketHash: string): Promise<number | null> {
+    const record = socketTickets.get(ticketHash);
+    if (!record || record.consumed || record.expiresAt.getTime() <= Date.now()) return null;
+    record.consumed = true;
+    return record.userId;
   },
 };
 

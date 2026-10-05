@@ -1,6 +1,7 @@
 import request from 'supertest';
 import app from '../../src/app';
-import { createUserRecord, signAccessToken } from '../../src/auth/session';
+import { createUserRecord } from '../../src/repositories/fakes/test-state';
+import { signAccessToken } from '../../src/auth/session';
 import { Role } from '../../src/domain/enums';
 
 describe('Sector and admin management', () => {

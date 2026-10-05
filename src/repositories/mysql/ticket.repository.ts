@@ -1,8 +1,11 @@
-import type { RowDataPacket } from 'mysql2/promise';
+import type { ExecuteValues, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { mysqlPool } from '../../config/database';
 import { TicketStatus } from '../../domain/enums';
 import type { Ticket } from '../../domain/models';
 import type { TicketRecordRow } from '../interfaces';
+import { unitOfWork, type UnitOfWorkContext } from '../unit-of-work';
+
+const ticketColumns = 'id, client_id, technician_id, sector_id, title, description, status, resolution_note, created_at, updated_at, assumed_at, resolved_at, cancelled_at';
 
 function mapTicket(row: TicketRecordRow): Ticket {
   return {
@@ -24,23 +27,34 @@ function mapTicket(row: TicketRecordRow): Ticket {
 
 export const ticketRepository = {
   async findById(id: number): Promise<Ticket | null> {
-    const [rows] = await mysqlPool.query<RowDataPacket[]>('SELECT * FROM tickets WHERE id = ?', [id]);
+    const [rows] = await mysqlPool.query<RowDataPacket[]>(`SELECT ${ticketColumns} FROM tickets WHERE id = ?`, [id]);
     const row = rows[0] as TicketRecordRow | undefined;
     return row ? mapTicket(row) : null;
   },
 
   async findByClient(clientId: number): Promise<Ticket[]> {
-    const [rows] = await mysqlPool.query<RowDataPacket[]>('SELECT * FROM tickets WHERE client_id = ? ORDER BY created_at DESC', [clientId]);
+    const [rows] = await mysqlPool.query<RowDataPacket[]>(`SELECT ${ticketColumns} FROM tickets WHERE client_id = ? ORDER BY created_at DESC`, [clientId]);
+    return (rows as TicketRecordRow[]).map(mapTicket);
+  },
+
+  async findByTechnician(technicianId: number): Promise<Ticket[]> {
+    const [rows] = await mysqlPool.query<RowDataPacket[]>(
+      `SELECT ${ticketColumns} FROM tickets WHERE technician_id = ? ORDER BY updated_at DESC`,
+      [technicianId],
+    );
     return (rows as TicketRecordRow[]).map(mapTicket);
   },
 
   async findOpen(): Promise<Ticket[]> {
-    const [rows] = await mysqlPool.query<RowDataPacket[]>('SELECT * FROM tickets WHERE status = ? ORDER BY created_at DESC', [TicketStatus.OPEN]);
+    const [rows] = await mysqlPool.query<RowDataPacket[]>(`SELECT ${ticketColumns} FROM tickets WHERE status = ? ORDER BY created_at DESC`, [TicketStatus.OPEN]);
     return (rows as TicketRecordRow[]).map(mapTicket);
   },
 
-  async create(input: Partial<Ticket> & { clientId: number; sectorId: number | null; title: string; description: string; status: TicketStatus; technicianId?: number | null; resolutionNote?: string | null }): Promise<Ticket> {
-    const values: any[] = [
+  async create(
+    input: Partial<Ticket> & { clientId: number; sectorId: number | null; title: string; description: string; status: TicketStatus; technicianId?: number | null; resolutionNote?: string | null },
+    context: UnitOfWorkContext = {},
+  ): Promise<Ticket> {
+    const values: ExecuteValues[] = [
       input.clientId,
       input.technicianId ?? null,
       input.sectorId ?? null,
@@ -52,17 +66,22 @@ export const ticketRepository = {
       input.resolvedAt ?? null,
       input.cancelledAt ?? null,
     ];
-    const [result] = await mysqlPool.execute<any>(
-      `INSERT INTO tickets (client_id, technician_id, sector_id, title, description, status, resolution_note, assumed_at, resolved_at, cancelled_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      values as any,
-    );
-    return (await this.findById(Number(result.insertId))) as Ticket;
+    const ticketId = await unitOfWork.run(context, async (connection) => {
+      const [result] = await connection.execute<ResultSetHeader>(
+        `INSERT INTO tickets (client_id, technician_id, sector_id, title, description, status, resolution_note, assumed_at, resolved_at, cancelled_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        values,
+      );
+      return Number(result.insertId);
+    });
+    const created = await this.findById(ticketId);
+    if (!created) throw new Error('TICKET_NOT_CREATED');
+    return created;
   },
 
-  async update(id: number, patch: Partial<Ticket>): Promise<Ticket | null> {
+  async update(id: number, patch: Partial<Ticket>, context: UnitOfWorkContext = {}): Promise<Ticket | null> {
     const entries: string[] = [];
-    const values: any[] = [];
+    const values: ExecuteValues[] = [];
 
     if (patch.clientId !== undefined) { entries.push('client_id = ?'); values.push(patch.clientId); }
     if (patch.technicianId !== undefined) { entries.push('technician_id = ?'); values.push(patch.technicianId ?? null); }
@@ -80,7 +99,20 @@ export const ticketRepository = {
     }
 
     values.push(id);
-    await mysqlPool.execute(`UPDATE tickets SET ${entries.join(', ')}, updated_at = NOW() WHERE id = ?`, values as any);
+    await unitOfWork.run(context, async (connection) => {
+      await connection.execute(`UPDATE tickets SET ${entries.join(', ')}, updated_at = NOW() WHERE id = ?`, values);
+    });
     return this.findById(id);
+  },
+
+  async runLifecycleProcedure(
+    procedure: 'sp_assume_ticket' | 'sp_return_ticket' | 'sp_finish_ticket' | 'sp_cancel_ticket',
+    parameters: Array<number | string | null>,
+    context: UnitOfWorkContext,
+  ): Promise<void> {
+    await unitOfWork.run(context, async (connection) => {
+      const placeholders = parameters.map(() => '?').join(', ');
+      await connection.query(`CALL ${procedure}(${placeholders})`, parameters);
+    });
   },
 };

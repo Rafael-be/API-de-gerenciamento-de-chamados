@@ -1,8 +1,15 @@
-import type { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import type { ExecuteValues, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { mysqlPool } from '../../config/database';
 import { Role, UserStatus } from '../../domain/enums';
 import type { User } from '../../domain/models';
 import type { UserRecordRow } from '../interfaces';
+import { unitOfWork, type UnitOfWorkContext } from '../unit-of-work';
+
+function toMysqlDateTime(value: string | Date): string {
+  return new Date(value).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+const userColumns = 'id, name, email, password_hash, role, sector_id, is_active, must_change_password, password_changed_at, last_login_at, created_at, updated_at';
 
 function mapUser(row: UserRecordRow): User {
   return {
@@ -24,24 +31,27 @@ function mapUser(row: UserRecordRow): User {
 
 export const userRepository = {
   async findById(id: number): Promise<User | null> {
-    const [rows] = await mysqlPool.query<RowDataPacket[]>('SELECT * FROM users WHERE id = ?', [id]);
+    const [rows] = await mysqlPool.query<RowDataPacket[]>(`SELECT ${userColumns} FROM users WHERE id = ?`, [id]);
     const row = rows[0] as UserRecordRow | undefined;
     return row ? mapUser(row) : null;
   },
 
   async findByEmail(email: string): Promise<User | null> {
-    const [rows] = await mysqlPool.query<RowDataPacket[]>('SELECT * FROM users WHERE email = ?', [email.toLowerCase()]);
+    const [rows] = await mysqlPool.query<RowDataPacket[]>(`SELECT ${userColumns} FROM users WHERE email = ?`, [email.toLowerCase()]);
     const row = rows[0] as UserRecordRow | undefined;
     return row ? mapUser(row) : null;
   },
 
   async listByRole(role: Role): Promise<User[]> {
-    const [rows] = await mysqlPool.query<RowDataPacket[]>('SELECT * FROM users WHERE role = ? ORDER BY id ASC', [role]);
+    const [rows] = await mysqlPool.query<RowDataPacket[]>(`SELECT ${userColumns} FROM users WHERE role = ? ORDER BY id ASC`, [role]);
     return (rows as UserRecordRow[]).map(mapUser);
   },
 
-  async create(input: Partial<User> & { email: string; passwordHash: string; role: Role }): Promise<User> {
-    const values: any[] = [
+  async create(
+    input: Omit<Partial<User>, 'name'> & { name: string; email: string; passwordHash: string; role: Role },
+    context: UnitOfWorkContext = {},
+  ): Promise<User> {
+    const values: ExecuteValues[] = [
       input.name,
       input.email.toLowerCase(),
       input.passwordHash,
@@ -51,23 +61,25 @@ export const userRepository = {
       input.mustChangePassword ? 1 : 0,
     ];
 
-    const [result] = await mysqlPool.execute<ResultSetHeader>(
-      `INSERT INTO users (name, email, password_hash, role, sector_id, is_active, must_change_password, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      values as any,
-    );
+    const userId = await unitOfWork.run(context, async (connection) => {
+      const [result] = await connection.execute<ResultSetHeader>(
+        `INSERT INTO users (name, email, password_hash, role, sector_id, is_active, must_change_password, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        values,
+      );
+      return Number(result.insertId);
+    });
 
-    const userId = result.insertId;
-    const created = await this.findById(Number(userId));
+    const created = await this.findById(userId);
     if (!created) {
       throw new Error('USER_NOT_CREATED');
     }
     return created;
   },
 
-  async update(id: number, patch: Partial<User>): Promise<User | null> {
+  async update(id: number, patch: Partial<User>, context: UnitOfWorkContext = {}): Promise<User | null> {
     const entries: string[] = [];
-    const values: any[] = [];
+    const values: ExecuteValues[] = [];
 
     if (patch.name !== undefined) { entries.push('name = ?'); values.push(patch.name); }
     if (patch.email !== undefined) { entries.push('email = ?'); values.push(patch.email.toLowerCase()); }
@@ -76,8 +88,8 @@ export const userRepository = {
     if (patch.sectorId !== undefined) { entries.push('sector_id = ?'); values.push(patch.sectorId ?? null); }
     if (patch.isActive !== undefined) { entries.push('is_active = ?'); values.push(patch.isActive ? 1 : 0); }
     if (patch.mustChangePassword !== undefined) { entries.push('must_change_password = ?'); values.push(patch.mustChangePassword ? 1 : 0); }
-    if (patch.passwordChangedAt !== undefined) { entries.push('password_changed_at = ?'); values.push(patch.passwordChangedAt); }
-    if (patch.lastLoginAt !== undefined) { entries.push('last_login_at = ?'); values.push(patch.lastLoginAt); }
+    if (patch.passwordChangedAt !== undefined) { entries.push('password_changed_at = ?'); values.push(patch.passwordChangedAt ? toMysqlDateTime(patch.passwordChangedAt) : null); }
+    if (patch.lastLoginAt !== undefined) { entries.push('last_login_at = ?'); values.push(patch.lastLoginAt ? toMysqlDateTime(patch.lastLoginAt) : null); }
     if (patch.status !== undefined) { entries.push('is_active = ?'); values.push(patch.status === UserStatus.ACTIVE ? 1 : 0); }
 
     if (entries.length === 0) {
@@ -85,7 +97,15 @@ export const userRepository = {
     }
 
     values.push(id);
-    await mysqlPool.execute(`UPDATE users SET ${entries.join(', ')}, updated_at = NOW() WHERE id = ?`, values as any);
+    await unitOfWork.run(context, async (connection) => {
+      await connection.execute(`UPDATE users SET ${entries.join(', ')}, updated_at = NOW() WHERE id = ?`, values);
+    });
     return this.findById(id);
+  },
+
+  async deactivateTechnician(id: number, context: UnitOfWorkContext = {}): Promise<void> {
+    await unitOfWork.run(context, async (connection) => {
+      await connection.query('CALL sp_deactivate_technician(?)', [id]);
+    });
   },
 };

@@ -1,6 +1,7 @@
 import request from 'supertest';
 import app from '../../src/app';
-import { createSectorRecord, createUserRecord, signAccessToken } from '../../src/auth/session';
+import { createSectorRecord, createUserRecord } from '../../src/repositories/fakes/test-state';
+import { signAccessToken } from '../../src/auth/session';
 import { Role } from '../../src/domain/enums';
 
 describe('Comment routes', () => {

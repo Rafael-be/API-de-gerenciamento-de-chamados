@@ -9,13 +9,26 @@ import ticketRouter from './routes/tickets';
 import commentRouter from './routes/comments';
 import notificationRouter from './routes/notifications';
 import { AppError } from './errors/app-error';
+import { addRequestIdHeader, attachRequestId } from './middleware/security';
 
 function createApp(): Express {
   const app = express();
 
   app.disable('x-powered-by');
+  app.use(attachRequestId);
+  app.use(addRequestIdHeader);
   app.use(helmet());
-  app.use(cors({ origin: appConfig.corsOrigins, credentials: true }));
+  app.use(cors({
+    origin(origin, callback) {
+      if (!origin || appConfig.corsOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error('INVALID_ORIGIN'));
+    },
+    credentials: true,
+  }));
   app.use(express.json({ limit: '100kb' }));
   app.use(cookieParser());
 
@@ -36,17 +49,33 @@ function createApp(): Express {
   app.use('/api/v1', commentRouter);
   app.use('/api/v1', notificationRouter);
 
-  app.use((_req: Request, res: Response) => {
+  app.use((req: Request, res: Response) => {
     res.status(404).json({
       success: false,
       error: {
         code: 'ROUTE_NOT_FOUND',
         message: 'Rota não encontrada.',
       },
+      requestId: req.requestId,
     });
   });
 
-  app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
+    const malformedJson = error instanceof SyntaxError && 'body' in error && (error as SyntaxError & { type?: string }).type === 'entity.parse.failed';
+
+    if (malformedJson) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_JSON',
+          message: 'JSON inválido ou malformado.',
+          details: null,
+        },
+        requestId: req.requestId,
+      });
+      return;
+    }
+
     if (error instanceof AppError) {
       res.status(error.httpStatus).json({
         success: false,
@@ -55,7 +84,7 @@ function createApp(): Express {
           message: error.message,
           details: error.details ?? null,
         },
-        requestId: 'req-local',
+        requestId: req.requestId,
       });
       return;
     }
@@ -68,7 +97,7 @@ function createApp(): Express {
         message,
         details: null,
       },
-      requestId: 'req-local',
+      requestId: req.requestId,
     });
   });
 

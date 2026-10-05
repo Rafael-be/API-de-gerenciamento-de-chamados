@@ -19,6 +19,7 @@ import {
   upsertUser,
 } from '../auth/session';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
+import { authRateLimiter } from '../middleware/security';
 
 const authRouter = Router();
 
@@ -61,6 +62,7 @@ function asyncHandler(
 
 authRouter.post(
   '/auth/register',
+  authRateLimiter,
   asyncHandler(async (req, res) => {
     const parsed = registerSchema.safeParse(req.body);
 
@@ -98,6 +100,7 @@ authRouter.post(
 
 authRouter.post(
   '/auth/login',
+  authRateLimiter,
   asyncHandler(async (req, res) => {
     const parsed = loginSchema.safeParse(req.body);
 
@@ -133,6 +136,7 @@ authRouter.post(
 
 authRouter.post(
   '/auth/refresh',
+  authRateLimiter,
   asyncHandler(async (req, res) => {
     const refreshTokenValue = typeof req.cookies?.refresh_token === 'string' ? req.cookies.refresh_token : undefined;
 
@@ -176,6 +180,7 @@ authRouter.post(
 
 authRouter.post(
   '/auth/logout',
+  authRateLimiter,
   asyncHandler(async (req, res) => {
     const refreshTokenValue = typeof req.cookies?.refresh_token === 'string' ? req.cookies.refresh_token : undefined;
 

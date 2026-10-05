@@ -29,7 +29,7 @@ const envSchema = z.object({
   DB_HOST: z.string().min(1).default('127.0.0.1'),
   DB_PORT: z.coerce.number().int().positive().default(3306),
   DB_USER: z.string().min(1).default('helpdesk_user'),
-  DB_PASSWORD: z.string().min(1).default('helpdesk_pass'),
+  DB_PASSWORD: z.string().min(1).default('dev-db-password'),
   DB_NAME: z.string().min(1).default('helpdesk'),
   DB_POOL_LIMIT: z.coerce.number().int().positive().default(10),
   DB_SSL: booleanFromEnv.default(false),
@@ -39,7 +39,7 @@ const envSchema = z.object({
   TEST_DB_USER: z.string().optional().default('root'),
   TEST_DB_PASSWORD: z.string().optional().default(''),
   TEST_DB_NAME: z.string().optional().default('helpdesk_test'),
-  JWT_ACCESS_SECRET: z.string().min(16).default('dev-secret-change-me-1234'),
+  JWT_ACCESS_SECRET: z.string().min(16).default('dev-access-secret-change-me'),
   JWT_ACCESS_TTL: z.string().min(1).default('15m'),
   REFRESH_TTL_DAYS: z.coerce.number().int().positive().default(30),
   REFRESH_GRACE_SECONDS: z.coerce.number().int().nonnegative().default(20),
@@ -50,8 +50,8 @@ const envSchema = z.object({
   SOCKET_TICKET_TTL_SECONDS: z.coerce.number().int().positive().default(30),
   SUPERUSER_NAME: z.string().min(1).default('Administrador'),
   SUPERUSER_EMAIL: z.string().email().default('admin@helpdesk.local'),
-  SUPERUSER_PASSWORD: z.string().min(8).default('TroqueEstaSenha123'),
-  DEFAULT_RESET_PASSWORD: z.string().min(8).default('SenhaTeste123'),
+  SUPERUSER_PASSWORD: z.string().min(8).default('DevSuperuserPassword123'),
+  DEFAULT_RESET_PASSWORD: z.string().min(8).default('DevResetPassword123'),
 });
 
 export type AppConfig = {
@@ -88,6 +88,17 @@ export type AppConfig = {
 
 export function loadEnv(env: Record<string, string | undefined> = process.env): AppConfig {
   const parsed = envSchema.parse(env);
+
+  if (parsed.NODE_ENV === 'production') {
+    const requiredProductionKeys = ['DB_PASSWORD', 'JWT_ACCESS_SECRET', 'SUPERUSER_PASSWORD', 'DEFAULT_RESET_PASSWORD'] as const;
+    const missingKeys = requiredProductionKeys.filter((key) => !env[key] || env[key]!.trim() === '');
+
+    if (missingKeys.length > 0) {
+      throw new Error(
+        `Production environment requires explicit values for: ${missingKeys.join(', ')}.`,
+      );
+    }
+  }
 
   return {
     nodeEnv: parsed.NODE_ENV,

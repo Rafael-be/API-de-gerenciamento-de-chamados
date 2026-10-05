@@ -359,7 +359,7 @@ O frontend em desenvolvimento roda em `http://localhost:5173` (Vite), que já es
 | `DB_POOL_LIMIT` | Tamanho do pool | `10` |
 | `DB_SSL` · `DB_SSL_CA` | SSL e certificado CA (Aiven) | `false` · *(vazio local)* |
 | `TEST_DB_*` | Banco de testes (Docker, porta 3307) | `helpdesk_test` |
-| `JWT_ACCESS_SECRET` · `JWT_ACCESS_TTL` | Assinatura e validade do access token | *(segredo longo)* · `15m` |
+| `JWT_ACCESS_SECRET` · `JWT_ACCESS_TTL` | Assinatura e validade do access token | `substitua-por-um-segredo-longo-e-aleatorio` · `15m` |
 | `REFRESH_TTL_DAYS` · `REFRESH_GRACE_SECONDS` | Validade do refresh e janela de tolerância | `30` · `20` |
 | `BCRYPT_ROUNDS` | Custo do bcrypt | `12` |
 | `COOKIE_SECURE` | `true` em produção | `false` |
@@ -367,7 +367,7 @@ O frontend em desenvolvimento roda em `http://localhost:5173` (Vite), que já es
 | `TRUST_PROXY` | Confiar no proxy (produção) | `false` |
 | `SOCKET_TICKET_TTL_SECONDS` | Validade do ticket do socket | `30` |
 | `SUPERUSER_NAME` · `SUPERUSER_EMAIL` · `SUPERUSER_PASSWORD` | Superusuário (seed) | — |
-| `DEFAULT_RESET_PASSWORD` | Senha aplicada no reset de técnicos | `SenhaTeste123` |
+| `DEFAULT_RESET_PASSWORD` | Senha aplicada no reset de técnicos | `troque-por-uma-senha-forte` |
 
 ---
 
